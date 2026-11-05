@@ -42,7 +42,7 @@ For a standalone upload request, report each file's result briefly. Do not print
 | Error | Action |
 | --- | --- |
 | Tool call blocked by Claude Code's permission check | Explain that `capcut_asset_upload_credential` issues short-lived upload credentials, so Claude Code asks first. The user can approve it once, or allow it permanently with `/permissions`. |
-| `upload ticket is invalid or expired` | Request a new ticket (step 2) and upload again at once. |
+| `upload ticket is invalid or expired`, or HTTP 401 or 403 from the upload storage step | The ticket or its short-lived storage key expired. Request a new ticket (step 2) and upload again at once. This is not a sign-in problem, so do not ask the user to reconnect. |
 | `files do not match the ticket` | Run `describe` again and request a new ticket with its exact output. |
 | `public: false` with a `vid` | The upload worked but finalizing did not. Keep the `vid`. Do not upload again. |
 | `Untrusted upload host` | Stop and report it. Do not work around it. |
