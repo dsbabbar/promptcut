@@ -87,6 +87,18 @@ To remove promptcut, run `claude plugin uninstall promptcut@promptcut`, or use t
 
 This usually means a region mismatch. A US internet connection needs a US-registered CapCut account, and a non-US connection needs a non-US account. Sign out at capcut.com, sign in with a matching account, then run **Authenticate** again.
 
+### How do I switch to a different CapCut account?
+
+The sign-in uses whichever CapCut account your browser is signed in to, so:
+
+1. Go to www.capcut.com in your browser, sign out, and sign in with the other account.
+2. Disconnect promptcut:
+   - **Desktop app:** type `/mcp`, search for **promptcut**, open its **Connectors** tab, click **capcut** and disconnect it.
+   - **Terminal:** type `/mcp`, select **capcut** and choose **Clear authentication**.
+3. Connect again as in [How do I install it?](#how-do-i-install-it), then start a new session.
+
+Uploads and drafts belong to the account they were made with, so files uploaded with the old account need to be uploaded again.
+
 ### The browser shows "connection refused" on a localhost page after signing in
 
 The login wait expired or a firewall blocked the local callback. Run **Authenticate** again, and allow the local connection if your firewall asks.

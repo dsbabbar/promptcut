@@ -1,6 +1,6 @@
 {
   "name": "promptcut",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Unofficial CapCut plugin for Claude Code",
   "license": "MIT",

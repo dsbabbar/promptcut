@@ -17,9 +17,11 @@ Only some types search by `prompt`:
 
 | Searches by prompt | Returns a fixed curated list |
 | --- | --- |
-| `sound_effect`, `video_effect`, and `music` in most regions | `font`, `text_effect`, `text_template`, `face_effect`, `transition`, `filter`, and `music` for US accounts |
+| `music`, `sound_effect` and `video_effect`, in every region | `font`, `text_effect`, `text_template`, `face_effect`, `transition` and `filter` |
 
-For curated types, the prompt does not change the results. Tell the user plainly that CapCut returned its curated list for their account rather than results matched to their request. If the results look generic (unrelated titles, one artist, no descriptions), music is curated for this account too, so say so.
+For curated types, the prompt does not change the results. Tell the user plainly that CapCut returned its curated list rather than results matched to their request.
+
+Music used to be curated for US accounts, and CapCut now searches it by prompt in every region. Treat music results as matched to the request. Only if they clearly ignore it (unrelated titles, one artist, no descriptions) say that CapCut seems to have returned a general list, and offer a different wording.
 
 ## Present results
 

@@ -46,7 +46,9 @@ Some CapCut tools answer even when the user's sign-in has expired. Material sear
 
 ## Stop at the first login error
 
-CapCut sign-ins expire, often overnight. A tool result is a login error when it says the user is not logged in, a token is invalid or expired, it is unauthorized (HTTP 401), or it contains text such as `check login error` or `get user workspace failed`.
+CapCut sign-ins expire, often overnight. A tool result is a login error when it says the user is not logged in, a token is invalid or expired, a CapCut tool call is unauthorized (HTTP 401), or it contains text such as `check login error` or `get user workspace failed`.
+
+A 401 or 403 from the upload storage step inside `scripts/capcut-upload.mjs` is not a login error: it means the short-lived upload ticket or storage key expired. Follow the `capcut-upload` skill and request a new ticket instead. Never ask the user to sign in again because of an upload storage error.
 
 On the first login error:
 
@@ -62,6 +64,18 @@ Claude cannot complete the login itself. Tell the user to:
 - **Claude desktop app:** type `/mcp` (it opens **Settings → Connectors**), search for **promptcut**, open its **Connectors** tab, click **capcut** and connect it. Approve opening www.capcut.com, sign in in the browser, then click **Done**. Also add **capcut-cards**, which needs no sign-in. Then start a new session.
 - **Terminal:** run `/mcp`, select **capcut** (it may show as `plugin:promptcut:capcut`) and choose **Authenticate**. Sign in to CapCut in the browser window that opens, then return to Claude Code.
 
+## Switch to a different CapCut account
+
+The sign-in page uses whichever CapCut account the browser is signed in to, so sign out there first. Tell the user to:
+
+1. Open www.capcut.com in their browser, sign out, and sign in with the account they want.
+2. Disconnect promptcut from the current account:
+   - **Claude desktop app:** type `/mcp`, search for **promptcut**, open its **Connectors** tab, click **capcut** and disconnect it.
+   - **Terminal:** run `/mcp`, select **capcut** and choose **Clear authentication**.
+3. Connect again with the [Log in](#log-in) steps, then start a new session.
+
+Uploads, drafts and generated media belong to the account they were made with. After switching, earlier `vid`s, `uri`s and draft sessions from this conversation won't work: say so, and start from the new account.
+
 The login only works when Claude Code runs on the user's own computer. CapCut accepts local callback addresses only, so cloud sessions and the claude.ai website cannot finish it.
 
 ## Fix common problems
@@ -72,7 +86,7 @@ The login only works when Claude Code runs on the user's own computer. CapCut ac
 | Browser shows "connection refused" on a `localhost` page | The login wait expired or a firewall blocked the local callback. Run **Authenticate** again and allow the local connection if the firewall asks. |
 | HTTP 502 or Bad Gateway with no tool result | CapCut's service is temporarily down. Wait and retry later. Do not log out. |
 | Each CapCut tool is listed twice | The servers were also added by hand. Remove the manual copies with `claude mcp remove capcut` and `claude mcp remove capcut-cards`. |
-| A tool says `check login error`, `get user workspace failed`, not logged in or unauthorized | The CapCut sign-in has expired. Follow [Stop at the first login error](#stop-at-the-first-login-error). |
+| A CapCut tool says `check login error`, `get user workspace failed`, not logged in or unauthorized | The CapCut sign-in has expired. Follow [Stop at the first login error](#stop-at-the-first-login-error). |
 | Tools still missing after login | Start a new session. In a terminal, you can also run `/mcp` and choose **Reconnect** for capcut. |
 
 ## Safety
