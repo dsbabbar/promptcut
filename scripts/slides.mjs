@@ -4,7 +4,8 @@
 // Usage:
 //   node slides.mjs new    --out <deck.html> --title "<title>" [--ratio 16:9|4:3] [--lang en]
 //   node slides.mjs check  --file <deck.html> [--render] [--fix-runtime]
-//   node slides.mjs export --file <deck.html> --format png|pdf|pptx|sheet [--out <path>] [--scale 2]
+//   node slides.mjs export --file <deck.html> --format png|pdf|pptx|sheet [--out <path>] [--scale 2|video]
+//   node slides.mjs video-plan --file <deck.html> --uploads <upload-results.json> --out <ops.json> [--seconds 4] [--notes-as-captions [--font vimo://<id>]]
 //   node slides.mjs open   --file <deck.html>
 //
 // Prints one JSON object. Rendering (check --render, export) needs Google Chrome, Microsoft Edge, Chromium or
@@ -20,14 +21,15 @@ import { buildPptx } from './slides-pptx.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const RUNTIME_FILE = path.join(HERE, 'slides-runtime.js')
 export const RATIOS = { '16:9': [1280, 720], '4:3': [1024, 768] }
+export const VIDEO_HEIGHT = 1080
 const RUNTIME_START = /<!-- promptcut-slides-runtime v(\d+)[^>]*-->/
 const RUNTIME_END = '<!-- /promptcut-slides-runtime -->'
 const BROWSER_TIMEOUT_MS = 90_000
 
 // ---------- arguments ----------
 
-const FLAGS = new Set(['--render', '--fix-runtime', '--help', '-h'])
-const OPTIONS = new Set(['--out', '--file', '--title', '--ratio', '--lang', '--format', '--scale'])
+const FLAGS = new Set(['--render', '--fix-runtime', '--notes-as-captions', '--help', '-h'])
+const OPTIONS = new Set(['--out', '--file', '--title', '--ratio', '--lang', '--format', '--scale', '--uploads', '--seconds', '--font'])
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv
@@ -175,7 +177,13 @@ export function listSlides(html) {
     const tag = match[0]
     if (!hasClass(tag, 'pc-slide')) continue
     const notes = attr(tag, 'data-notes')
-    slides.push({ num: slides.length + 1, id: attr(tag, 'id'), notes: notes === null ? '' : decodeEntities(notes).trim() })
+    const seconds = attr(tag, 'data-seconds')
+    slides.push({
+      num: slides.length + 1,
+      id: attr(tag, 'id'),
+      notes: notes === null ? '' : decodeEntities(notes).trim(),
+      seconds: seconds === null || seconds.trim() === '' ? null : Number(seconds),
+    })
   }
   return slides
 }
@@ -281,6 +289,8 @@ export function staticCheck(html, deckPath) {
   if (info.deckCount && !RATIOS[info.ratio]) errors.push(`data-ratio on pc-deck must be "16:9" or "4:3" (found ${info.ratio === null ? 'none' : `"${info.ratio}"`}).`)
   const slides = listSlides(html)
   if (!slides.length) errors.push('No slides. Each slide is a <section class="pc-slide"> inside pc-deck.')
+  const badSeconds = slides.filter(s => s.seconds !== null && !(s.seconds >= 0.5 && s.seconds <= 600)).map(s => s.num)
+  if (badSeconds.length) errors.push(`data-seconds must be a number of seconds from 0.5 to 600 (slides ${badSeconds.join(', ')}).`)
   const noNotes = slides.filter(s => !s.notes).map(s => s.num)
   if (noNotes.length) warnings.push(`Slides without speaker notes (data-notes): ${noNotes.join(', ')}.`)
 
@@ -533,11 +543,12 @@ async function cmdExport(args) {
   const file = requireFile(args)
   const format = (args.format || '').toLowerCase()
   if (!['png', 'pdf', 'pptx', 'sheet'].includes(format)) throw new Error('--format must be png, pdf, pptx or sheet')
-  const scale = args.scale === undefined ? (format === 'sheet' ? 1 : 2) : Number(args.scale)
-  if (!(scale >= 1 && scale <= 4)) throw new Error('--scale must be between 1 and 4')
   const html = fs.readFileSync(file, 'utf8')
   const check = staticCheck(html, file)
   if (check.errors.length) return { success: false, file, errors: check.errors, warnings: check.warnings }
+  // "video" renders slides 1080 px tall: 1920x1080 for 16:9, 1440x1080 for 4:3.
+  const scale = args.scale === undefined ? (format === 'sheet' ? 1 : 2) : args.scale === 'video' ? VIDEO_HEIGHT / RATIOS[check.ratio][1] : Number(args.scale)
+  if (!(scale >= 1 && scale <= 4)) throw new Error('--scale must be between 1 and 4, or video')
   const browser = findBrowser()
   const out = path.resolve(args.out || defaultOut(file, format))
   const base = { success: true, file, format, slideCount: check.slideCount, warnings: check.warnings }
@@ -579,6 +590,76 @@ async function cmdExport(args) {
   }
 }
 
+// Map uploaded slide images (slide-01.png ...) back to slide numbers.
+export function slideUploads(uploads, count) {
+  const list = Array.isArray(uploads) ? uploads : uploads?.results
+  if (!Array.isArray(list)) throw new Error('--uploads must be the JSON printed by capcut-upload.mjs (an object with a "results" array)')
+  const bySlide = new Map()
+  for (const item of list) {
+    const name = path.basename(String(item?.file_name || item?.file || ''))
+    const match = /(?:^|[^0-9])(\d{1,3})\.(png|jpe?g|webp)$/i.exec(name)
+    if (!match) continue
+    const num = parseInt(match[1], 10)
+    if (item.success === false || typeof item.uri !== 'string' || !item.uri) continue
+    if (bySlide.has(num)) throw new Error(`Two uploads are for slide ${num}`)
+    bySlide.set(num, item.uri)
+  }
+  const missing = []
+  for (let n = 1; n <= count; n++) if (!bySlide.has(n)) missing.push(n)
+  if (missing.length) throw new Error(`No uploaded image for slide(s) ${missing.join(', ')}. Upload the PNGs from export --format png and pass the upload results.`)
+  return bySlide
+}
+
+export function videoPlan({ slides, ratio, uploads, seconds = 4, notesAsCaptions = false, font = null }) {
+  if (font !== null && !/^vimo:\/\/\d+$/.test(font)) throw new Error('--font must be a CapCut font stdraft_uri such as vimo://123')
+  if (!(seconds >= 0.5 && seconds <= 600)) throw new Error('--seconds must be from 0.5 to 600')
+  const [w, h] = RATIOS[ratio]
+  const width = Math.round((w * VIDEO_HEIGHT) / h)
+  const bySlide = slideUploads(uploads, slides.length)
+  const operations = []
+  const cues = []
+  let at = 0
+  for (const slide of slides) {
+    const duration = Math.round((slide.seconds ?? seconds) * 1000)
+    const uri = bySlide.get(slide.num)
+    operations.push({ op: 'add_image', source: uri.includes('://') ? uri : `tos://${uri.replace(/^\/+/, '')}`, start_ms: at, duration_ms: duration })
+    if (notesAsCaptions && slide.notes) cues.push({ start_ms: at, end_ms: at + duration, text: slide.notes.replace(/\s+/g, ' ').trim() })
+    at += duration
+  }
+  if (cues.length) operations.push(font ? { op: 'add_captions', cues, font } : { op: 'add_captions', cues })
+  return { width, height: VIDEO_HEIGHT, totalMs: at, operations }
+}
+
+function cmdVideoPlan(args) {
+  const file = requireFile(args)
+  if (!args.uploads) throw new Error('--uploads is required')
+  if (!args.out) throw new Error('--out is required')
+  const check = staticCheck(fs.readFileSync(file, 'utf8'), file)
+  if (!RATIOS[check.ratio] || !check.slideCount) return { success: false, file, errors: check.errors }
+  const uploads = JSON.parse(fs.readFileSync(path.resolve(args.uploads), 'utf8'))
+  const plan = videoPlan({
+    slides: check.slides,
+    ratio: check.ratio,
+    uploads,
+    seconds: args.seconds === undefined ? 4 : Number(args.seconds),
+    notesAsCaptions: Boolean(args.notesAsCaptions),
+    font: args.font ?? null,
+  })
+  const out = path.resolve(args.out)
+  fs.mkdirSync(path.dirname(out), { recursive: true })
+  fs.writeFileSync(out, `${JSON.stringify(plan.operations, null, 2)}\n`)
+  return {
+    success: true,
+    file,
+    ops: out,
+    width: plan.width,
+    height: plan.height,
+    slideCount: check.slideCount,
+    totalSeconds: plan.totalMs / 1000,
+    next: `node stdraft.mjs new --width ${plan.width} --height ${plan.height} --out <draft.json>, then apply --ops ${path.basename(out)}`,
+  }
+}
+
 function cmdOpen(args) {
   const file = requireFile(args)
   const url = pathToFileURL(file).href
@@ -593,7 +674,8 @@ function cmdOpen(args) {
 const HELP = `Usage:
   node slides.mjs new    --out <deck.html> --title "<title>" [--ratio 16:9|4:3] [--lang en]
   node slides.mjs check  --file <deck.html> [--render] [--fix-runtime]
-  node slides.mjs export --file <deck.html> --format png|pdf|pptx|sheet [--out <path>] [--scale 2]
+  node slides.mjs export --file <deck.html> --format png|pdf|pptx|sheet [--out <path>] [--scale 2|video]
+  node slides.mjs video-plan --file <deck.html> --uploads <upload-results.json> --out <ops.json> [--seconds 4] [--notes-as-captions [--font vimo://<id>]]
   node slides.mjs open   --file <deck.html>`
 
 export async function main(argv) {
@@ -603,6 +685,7 @@ export async function main(argv) {
   if (args.command === 'check') return cmdCheck(args)
   if (args.command === 'export') return cmdExport(args)
   if (args.command === 'open') return cmdOpen(args)
+  if (args.command === 'video-plan') return cmdVideoPlan(args)
   throw new Error(`Unknown command: ${args.command}\n${HELP}`)
 }
 

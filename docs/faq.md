@@ -16,7 +16,7 @@ Both connect an AI assistant to CapCut's hosted MCP server, so the CapCut featur
 
 ### Is promptcut a plugin, a skill or an MCP server?
 
-A **plugin**. It bundles 8 skills, 4 helper scripts, a setup hook and the addresses of CapCut's MCP servers. The MCP servers belong to CapCut and run on CapCut's servers; promptcut doesn't include its own. See [What's inside promptcut](whats-inside.md).
+A **plugin**. It bundles 9 skills, 5 helper scripts, a setup hook and the addresses of CapCut's MCP servers. The MCP servers belong to CapCut and run on CapCut's servers; promptcut doesn't include its own. See [What's inside promptcut](whats-inside.md).
 
 ### Was promptcut called claudecut?
 

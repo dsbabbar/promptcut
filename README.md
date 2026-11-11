@@ -8,8 +8,8 @@
 
 promptcut is a **Claude Code plugin**: one installable package. CapCut runs a hosted [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for AI assistants, and promptcut connects Claude Code to it. promptcut does not include an MCP server of its own. The plugin adds:
 
-- **8 skills:** instructions that teach Claude the right CapCut workflows and rules
-- **4 scripts:** local helpers for uploads, draft editing, subtitle files and saving results
+- **9 skills:** instructions that teach Claude the right CapCut workflows and rules
+- **5 scripts:** local helpers for uploads, draft editing, subtitle files, saving results and slide decks
 - **1 hook:** a setup check that runs when a chat starts
 
 See [What's inside promptcut](docs/whats-inside.md) for how the pieces fit together.
@@ -27,6 +27,7 @@ All AI generation, search and editing run on CapCut's servers under **your own C
 - A CapCut account. Your account region must match your internet connection's region (a US connection needs a US-registered account).
 - [Node.js](https://nodejs.org) 20 or later for uploads, draft editing, subtitle export and saving results (Windows: `winget install OpenJS.NodeJS.LTS`, macOS: `brew install node`)
 - Optional: [ffmpeg](https://ffmpeg.org), for portrait phone videos and mixed-language captions (Windows: `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`)
+- Optional: Google Chrome, Microsoft Edge, Chromium or Brave, for checking slide decks and exporting them to PDF, PNG or PowerPoint
 
 promptcut's scripts have no other dependencies. Plugins can't install software, so when a chat starts promptcut checks for Node.js and ffmpeg. If something is missing, Claude tells you and offers to install it for you (with your approval) or to show you the steps. To stop reminders about the optional ffmpeg, set the environment variable `PROMPTCUT_SKIP_FFMPEG_CHECK=1`.
 
@@ -83,6 +84,8 @@ Questions? See the [FAQ](docs/faq.md). Not sure whether promptcut or editing Cap
 | AI rough cut | "Cut these clips into a 30-second highlight reel" | Available |
 | Local uploads | "Use ./footage/intro.mp4 as the reference" | Available |
 | Draft editing | "Add the music and captions to my draft" | Available (drafts sync to every CapCut app signed in to your account) |
+| Slide decks | "Make a 10-slide pitch deck from these notes and export a PDF" | New: HTML decks with presenter view; PDF, PNG and PowerPoint export |
+| Slideshow video | "Turn this deck into a video with calm music" | New: builds a CapCut draft with one image per slide |
 
 **CapCut Credits:** some features spend CapCut credits. promptcut always shows the quoted cost and waits for your approval before any paid generation.
 
@@ -111,12 +114,13 @@ A regular claude.ai chat or a cloud session cannot use promptcut, because CapCut
 ## Known limitations
 
 - **Claude Code only.** CapCut's login accepts local callback addresses only, so the claude.ai website and cloud sessions cannot connect. CapCut's interactive cards are not shown; promptcut asks questions and shows results in the chat instead.
-- **Draft editing** covers text, captions, music, sound effects and main-track video clips. Filters, transitions, effects, text templates, stickers and picture-in-picture must be added in the CapCut web editor for now.
+- **Draft editing** covers text, captions, music, sound effects, main-track video clips and still images. Filters, transitions, effects, text templates, stickers and picture-in-picture must be added in the CapCut web editor for now.
 - **Captions for mixed-language videos** may miss short phrases in the second language. promptcut never fills gaps with its own translation; it tells you which parts have no captions.
 - **Draft names:** new drafts appear as "Untitled" in your CapCut apps, because CapCut's draft tools can't set a name. Rename them in any CapCut app.
 - **Emoji** in draft text may appear as plain monochrome symbols in CapCut's editor.
 - **Fonts:** promptcut sets a CapCut library font on text it adds, so it looks the same in the web editor and the desktop app. Text without a font, or with a local font saved by the desktop app, can wrap differently between the two.
 - **AI rough cuts** may use subscription credits and do not show a quote before starting.
+- **Slide decks:** PowerPoint exports show each slide as a picture, so the text can't be edited in PowerPoint (speaker notes are included). Decks use Google Fonts, which need an internet connection unless the fonts are installed.
 - **Upload permission:** Claude Code asks before running CapCut's upload-credential tool, because it issues short-lived upload keys.
 
 ## Development

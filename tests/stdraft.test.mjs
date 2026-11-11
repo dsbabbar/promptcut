@@ -147,3 +147,31 @@ test('handles untimed segments and flags fonts that are not library fonts', () =
   assert.deepEqual(fontProblems(draft), [])
   assert.ok(draft.segments.some(s => s.id === 'patch_0'), 'unknown segments are preserved')
 })
+
+test('add_image appends still images to the main track', () => {
+  const draft = newDraft(1920, 1080)
+  const { draft: out, changes } = applyOperations(draft, [
+    { op: 'add_image', source: 'tos-x/slide1', duration_ms: 4000 },
+    { op: 'add_image', source: 'tos://tos-x/slide2', duration_ms: 2500 },
+    { op: 'place', id: 'image_0', duration_ms: 3000 },
+  ])
+  const images = out.segments.filter(s => s.attributes?.meta_type === 'photo')
+  assert.equal(images.length, 2)
+  assert.equal(images[0].attributes.source, 'tos://tos-x/slide1')
+  assert.deepEqual(images[1].timeline, { 'start.ms': 4000, 'duration.ms': 2500 })
+  assert.equal(images[0].timeline['duration.ms'], 3000)
+  assert.ok(!('end.ms' in images[0].attributes), 'a still image has no source end')
+  assert.equal(images[0].type, 'VIDEO')
+  assert.equal(images[0].layout.layer, 0)
+  assert.match(changes[0], /Added image/)
+  assert.match(summarize(out), /\(still image\)/)
+  assert.deepEqual(validate(out), [])
+  assert.throws(() => applyOperations(draft, [{ op: 'add_image', source: 'tos://x' }]), /duration_ms/)
+  assert.throws(() => applyOperations(draft, [{ op: 'add_image', source: 'https://example.com/a.png', duration_ms: 1000 }]), /source must start with/)
+})
+
+test('validation rejects speed on still images', () => {
+  const { draft } = applyOperations(newDraft(1920, 1080), [{ op: 'add_image', source: 'tos://x/y', duration_ms: 1000 }])
+  draft.segments.find(s => s.type === 'VIDEO').attributes.speed = 2
+  assert.match(validate(draft).join('\n'), /cannot have speed/)
+})

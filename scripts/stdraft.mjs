@@ -75,6 +75,11 @@ function requireSource(value, kinds) {
   return value
 }
 
+function mainTrackEnd(draft) {
+  return Math.max(0, ...draft.segments.filter(s => s.type === 'VIDEO' && s.layout?.layer === 0)
+    .map(s => s.timeline['start.ms'] + s.timeline['duration.ms']))
+}
+
 export function draftDuration(draft) {
   return Math.max(0, ...draft.segments.filter(s => s.timeline).map(s => s.timeline['start.ms'] + s.timeline['duration.ms']))
 }
@@ -104,6 +109,7 @@ export function validate(draft) {
     if (s.type === 'TEXT' && !(typeof a.content === 'string' && a.content.trim())) errors.push(`${label} needs text content`)
     if ((s.type === 'VIDEO' || s.type === 'AUDIO') && typeof a.source !== 'string') errors.push(`${label} needs a source`)
     if ('start.ms' in a && 'end.ms' in a && a['end.ms'] <= a['start.ms']) errors.push(`${label} has a source range that ends before it starts`)
+    if (s.type === 'VIDEO' && a.meta_type === 'photo' && ('speed' in a || 'curve_speed' in a)) errors.push(`${label} is a still image, which cannot have speed or curve_speed`)
   }
   const mainTrack = draft.segments.filter(s => s.type === 'VIDEO' && s.layout?.layer === 0)
     .sort((x, y) => x.timeline['start.ms'] - y.timeline['start.ms'])
@@ -190,8 +196,7 @@ const OPERATIONS = {
     const source = requireSource(op.source, ['vid'])
     const from = requireMs(op.source_start_ms ?? 0, 'source_start_ms')
     const to = requireMs(op.source_end_ms, 'source_end_ms', { min: from + 1 })
-    const mainEnd = Math.max(0, ...draft.segments.filter(s => s.type === 'VIDEO' && s.layout?.layer === 0)
-      .map(s => s.timeline['start.ms'] + s.timeline['duration.ms']))
+    const mainEnd = mainTrackEnd(draft)
     const id = uniqueId(draft, 'video')
     draft.segments.push({
       id,
@@ -202,6 +207,25 @@ const OPERATIONS = {
       attributes: { source, meta_type: 'video', 'start.ms': from, 'end.ms': to, volume: op.volume ?? 1 },
     })
     return `Added video ${source} (${id}) for ${to - from} ms`
+  },
+
+  // {op, source: "tos://..." (an uploaded image's uri; the tos:// prefix is added if missing), duration_ms, start_ms?}
+  // A still image on the main track, shown for duration_ms. Appends to the end of the main track unless start_ms is given.
+  add_image(draft, op) {
+    const raw = typeof op.source === 'string' ? op.source.trim() : ''
+    if (!raw) throw new Error('source is required')
+    const source = requireSource(raw.includes('://') ? raw : `tos://${raw.replace(/^\/+/, '')}`, ['tos', 'vid', 'asset'])
+    const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
+    const id = uniqueId(draft, 'image')
+    draft.segments.push({
+      id,
+      type: 'VIDEO',
+      parent_id: root(draft).id,
+      timeline: { 'start.ms': requireMs(op.start_ms ?? mainTrackEnd(draft), 'start_ms'), 'duration.ms': duration },
+      layout: { layer: 0 },
+      attributes: { source, meta_type: 'photo', 'start.ms': 0 },
+    })
+    return `Added image ${source} (${id}) for ${duration} ms`
   },
 
   // {op, id, content?, volume?, font_size?, font_color?, font?, fade_in_ms?, fade_out_ms?}
@@ -235,7 +259,8 @@ const OPERATIONS = {
     if (op.start_ms !== undefined) { s.timeline['start.ms'] = requireMs(op.start_ms, 'start_ms'); changed.push('start') }
     if (op.duration_ms !== undefined) {
       const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
-      if (s.type === 'VIDEO' && 'start.ms' in (s.attributes ?? {})) s.attributes['end.ms'] = s.attributes['start.ms'] + duration
+      const isPhoto = s.attributes?.meta_type === 'photo'
+      if (s.type === 'VIDEO' && !isPhoto && 'start.ms' in (s.attributes ?? {})) s.attributes['end.ms'] = s.attributes['start.ms'] + duration
       s.timeline['duration.ms'] = duration; changed.push('duration')
     }
     for (const key of ['position_x', 'position_y']) {
@@ -302,7 +327,7 @@ export function summarize(draft) {
   for (const s of timed) {
     const t = s.timeline
     const a = s.attributes ?? {}
-    const what = s.type === 'TEXT' ? `"${a.content}"${a.font ? ` font ${a.font}` : ''}` : a.source ?? ''
+    const what = s.type === 'TEXT' ? `"${a.content}"${a.font ? ` font ${a.font}` : ''}` : `${a.source ?? ''}${a.meta_type === 'photo' ? ' (still image)' : ''}`
     const range = 'start.ms' in a && 'end.ms' in a ? ` from source ${fmt(a['start.ms'])}-${fmt(a['end.ms'])}` : ''
     lines.push(`${s.id.padEnd(12)} ${String(s.type).padEnd(5)} layer ${String(s.layout?.layer).padEnd(4)} ${fmt(t['start.ms'])}-${fmt(t['start.ms'] + t['duration.ms'])}  ${what}${range}`)
   }
