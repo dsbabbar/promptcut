@@ -5,6 +5,8 @@ description: Add, change or remove captions, text, music and video clips in a Ca
 
 # Edit CapCut drafts
 
+Before the first CapCut account step in this conversation, check the sign-in with `capcut_get_profile` as the `capcut-connect` skill describes.
+
 Before running any `${CLAUDE_PLUGIN_ROOT}/scripts/` command or ffmpeg, make sure the `capcut-connect` skill's setup check has passed in this conversation.
 
 A CapCut draft is a cloud project that the user can also open in the CapCut web editor. Claude edits it as an STDraft JSON document: download it, change it locally with `scripts/stdraft.mjs`, then save it back. CapCut validates every save.
@@ -36,6 +38,7 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
    | `add_captions` | `cues: [{start_ms, end_ms, text}]`, optional `position_y`, `font_size`, `font` | All cues on one new layer, near the bottom by default. Use the `capcut-captions` skill to get cues. |
    | `add_audio` | `source`, optional `start_ms`, `duration_ms` (default: to the end), `volume`, `fade_in_ms`, `fade_out_ms`, `loop` | Music or sound effect. `source` is a `stdraft_uri` from `capcut-materials` (`vimo://...`) or an uploaded audio `vid` written as `vid://<vid>`. |
    | `add_video` | `source` (`vid://<vid>`), `source_end_ms`, optional `source_start_ms`, `start_ms`, `volume` | Appends to the end of the main track unless `start_ms` is given |
+   | `add_image` | `source` (an uploaded image's `uri`, written as `tos://<uri>`), `duration_ms`, optional `start_ms` | A still image on the main track, such as a slide or photo. Appends to the end of the main track unless `start_ms` is given. |
    | `update` | `id`, then any of `content`, `volume`, `font_size`, `font_color`, `font`, `fade_in_ms`, `fade_out_ms` | Changes a segment in place. Never add a new segment and call it an update. |
    | `place` | `id`, then any of `start_ms`, `duration_ms`, `position_x`, `position_y`, `layer` | Moves, trims or repositions a segment |
    | `remove` | `id` | Deletes a segment. Gaps it leaves are not closed. |
@@ -60,7 +63,7 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
 
 ## Limits of this version
 
-- Supported: text, captions, music and sound effects, main-track video clips, volume and fades, moving, trimming and removing segments.
+- Supported: text, captions, music and sound effects, main-track video clips and still images, volume and fades, moving, trimming and removing segments.
 - Not yet supported: filters, transitions, video effects, text effects, text templates, picture-in-picture and stickers. If asked for these, say so, and offer to find the material with `capcut-materials` so the user can apply it in the web editor.
 - CapCut converts drafts between its cloud format and STDraft, so a document read back can differ slightly from the one saved. Always continue from the read-back version.
 - Do not use the CapCut desktop app, browser automation or Computer Use to edit drafts.

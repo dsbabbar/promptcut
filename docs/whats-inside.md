@@ -8,8 +8,8 @@ promptcut is a **Claude Code plugin**. A plugin is a package that bundles severa
 | --- | --- | --- | --- |
 | **Plugin** | The installable package that holds everything below | promptcut | `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` |
 | **MCP servers** | Services that give Claude tools to call, such as "generate an image" or "search templates", running under your CapCut account | **CapCut**, on CapCut's servers | Only their addresses, in `.mcp.json` |
-| **Skills** | Written instructions that teach Claude how to use those tools well, for example to quote credits before spending them or never to invent captions | promptcut (8 skills) | `skills/` |
-| **Scripts** | Small Node.js programs for jobs CapCut's tools can't do alone: uploading files, editing drafts, writing subtitle files and saving results | promptcut (4 scripts) | `scripts/` |
+| **Skills** | Written instructions that teach Claude how to use those tools well, for example to quote credits before spending them or never to invent captions | promptcut (9 skills) | `skills/` |
+| **Scripts** | Small Node.js programs for jobs CapCut's tools can't do alone: uploading files, editing drafts, writing subtitle files, saving results and building slide decks | promptcut (5 scripts) | `scripts/` |
 | **Hook** | A command Claude Code runs automatically when a chat starts, to check that Node.js and ffmpeg are installed | promptcut | `hooks/` |
 
 An analogy: CapCut's MCP server is the **kitchen**, the skills are the **recipes**, the scripts are **extra kitchen tools**, and the plugin is the **box** that delivers them all.
@@ -69,7 +69,8 @@ CapCut built these servers for AI assistants. The official CapCut x Codex plugin
 | `capcut-captions` | Transcribe speech and get captions or SRT/VTT files |
 | `capcut-rough-cut` | Have CapCut's AI cut footage into a first edit |
 | `capcut-upload` | Send local videos, audio and images to CapCut |
-| `capcut-draft` | Add or change text, captions, music and clips in a CapCut draft |
+| `capcut-draft` | Add or change text, captions, music, clips and images in a CapCut draft |
+| `capcut-slides` | Make, present and export slide decks, and turn a deck into a CapCut slideshow video |
 
 You don't need to name a skill. Describe what you want, and Claude picks the right one.
 
@@ -81,6 +82,7 @@ You don't need to name a skill. Describe what you want, and Claude picks the rig
 | `scripts/stdraft.mjs` | Creates, summarizes, validates and edits CapCut draft documents (STDraft) on your computer |
 | `scripts/captions-to-subtitles.mjs` | Turns caption timings into SRT or WebVTT files |
 | `scripts/download-media.mjs` | Saves generated images and videos from expiring links to a local folder |
+| `scripts/slides.mjs` | Creates and checks HTML slide decks, exports them to PDF, PNG or PowerPoint with your installed Chrome or Edge, and plans slideshow drafts. Uses `slides-runtime.js` (the viewer built into each deck) and `slides-pptx.mjs` (the PowerPoint writer). |
 
 They use only Node.js's built-in modules, so there is nothing to `npm install`.
 

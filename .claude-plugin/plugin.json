@@ -1,7 +1,7 @@
 {
   "name": "promptcut",
-  "version": "0.1.4",
-  "description": "Unofficial community plugin that connects Claude Code to CapCut's AI video tools: template search, image and video generation, captions, AI rough cuts, uploads and draft editing. Not affiliated with CapCut or ByteDance.",
+  "version": "0.2.0",
+  "description": "Unofficial community plugin that connects Claude Code to CapCut's AI video tools: template search, image and video generation, captions, AI rough cuts, uploads, draft editing, and slide decks that export to PDF, PowerPoint or a CapCut slideshow video. Not affiliated with CapCut or ByteDance.",
   "author": {
     "name": "dsbabbar",
     "url": "https://github.com/dsbabbar"
@@ -17,7 +17,9 @@
     "video-generation",
     "captions",
     "templates",
-    "mcp"
+    "mcp",
+    "slides",
+    "presentation"
   ],
   "privacyPolicyUrl": "https://github.com/dsbabbar/promptcut#privacy-and-terms"
 }
