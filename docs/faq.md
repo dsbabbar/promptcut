@@ -110,7 +110,7 @@ CapCut sign-ins expire, often overnight. promptcut stops at the first login erro
 - **Desktop app:** type `/mcp`, search for **promptcut**, open its **Connectors** tab and connect **capcut** again. Then start a new session.
 - **Terminal:** type `/mcp`, select **capcut** and choose **Authenticate**.
 
-promptcut can't check your sign-in before you start, because Claude Code keeps the login to itself and some CapCut tools answer even when it has expired. It finds out on the first call that needs your account.
+promptcut checks your sign-in with CapCut before longer jobs (generation, rough cuts, uploads, captions and drafts), so an expired sign-in shows up before any work starts. You can also ask "Am I signed in to CapCut?" at any time: Claude tells you which account is connected.
 
 ### Every CapCut tool appears twice
 

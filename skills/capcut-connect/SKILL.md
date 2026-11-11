@@ -39,10 +39,15 @@ Never install software without the user's agreement.
 
 ## Check the connection
 
-Some CapCut tools answer even when the user's sign-in has expired. Material search is one of them, so a material search result does not prove the user is signed in. Never use a generation, upload or draft tool to test a connection.
+CapCut's server lists its tools even when the user is signed out, and some tools (such as material search) answer without an account, so a visible tool or a search result does not prove the user is signed in. Never use a generation, upload or draft tool to test a connection.
 
-- If the `capcut` tools are missing, or `/mcp` shows that capcut needs authentication, the user is signed out. Go to [Log in](#log-in).
-- Otherwise, treat the first account call of the workflow (for example a template search, caption job, upload ticket or draft session) as the check. If it returns a login error, stop as described below.
+To check the sign-in, call `capcut_get_profile` with empty arguments. It is free, changes nothing, and returns the signed-in account's nickname.
+
+- **It returns a nickname:** the user is signed in. Mention the nickname when it helps, for example when the user asks which account is connected or just switched accounts.
+- **It returns a login error or asks for authorization:** the user is signed out or the sign-in expired. Go to [Log in](#log-in).
+- **It fails for another reason, or the tool isn't available:** don't treat that as signed out and don't ask the user to sign in again. Treat the first account call of the workflow as the check instead.
+
+Run this check when the user asks to sign in, to check the connection or which account is connected, and before the first account step of a workflow that spends credits or takes a while (generation, AI rough cuts, uploads, captions, drafts). Once per conversation is enough unless a later call returns a login error.
 
 ## Stop at the first login error
 

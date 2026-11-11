@@ -5,6 +5,8 @@ description: Create an AI rough cut with CapCut from video clips and images, suc
 
 # AI rough cut with CapCut
 
+Before the first CapCut account step in this conversation, check the sign-in with `capcut_get_profile` as the `capcut-connect` skill describes.
+
 CapCut's editing agent builds a first cut from uploaded clips and images, sometimes asking for decisions along the way.
 
 ## Inputs
