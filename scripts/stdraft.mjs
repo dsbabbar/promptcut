@@ -191,7 +191,7 @@ const OPERATIONS = {
     return `Added ${added.length} captions on layer ${layer}`
   },
 
-  // {op, source: "vid://..." | "vimo://...", start_ms?, duration_ms?, volume?, fade_in_ms?, fade_out_ms?, loop?}
+  // {op, source: "sid://..." (searched music) | "vid://..." | "vimo://..." | "tos://...", start_ms?, duration_ms?, volume?, fade_in_ms?, fade_out_ms?, loop?}
   add_audio(draft, op) {
     const source = requireSource(op.source, ['sid', 'vid', 'vimo', 'tos'])
     const start = requireMs(op.start_ms ?? 0, 'start_ms')
