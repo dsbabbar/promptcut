@@ -115,6 +115,8 @@ A regular claude.ai chat or a cloud session cannot use promptcut, because CapCut
 
 - **Claude Code only.** CapCut's login accepts local callback addresses only, so the claude.ai website and cloud sessions cannot connect. CapCut's interactive cards are not shown; promptcut asks questions and shows results in the chat instead.
 - **Draft editing** covers text, captions, music, sound effects, main-track video clips and still images. Filters, transitions, effects, text templates, stickers and picture-in-picture must be added in the CapCut web editor for now.
+- **Caption tracks:** CapCut usually shows the first caption on a track of its own and the rest together on a second track. Drag the first caption onto the shared track in the editor if you want one track.
+- **Uploaded images** land loose in CapCut's Media panel; there's no way to put them in a folder.
 - **Captions for mixed-language videos** may miss short phrases in the second language. promptcut never fills gaps with its own translation; it tells you which parts have no captions.
 - **Draft names:** new drafts appear as "Untitled" in your CapCut apps, because CapCut's draft tools can't set a name. Rename them in any CapCut app.
 - **Emoji** in draft text may appear as plain monochrome symbols in CapCut's editor.

@@ -25,7 +25,7 @@ Music used to be curated for US accounts, and CapCut now searches it by prompt i
 
 ## Present results
 
-Show a numbered list with each item's title, the description CapCut returned, duration for audio, and a preview link when one is returned. Keep each item's `resource_id` and any `stdraft_uri` in the conversation for later use.
+Show a numbered list with each item's title, the description CapCut returned, duration for audio, and a preview link when one is returned. Keep each item's `resource_id` and any `stdraft_uri` in the conversation for later use. Pass the `stdraft_uri` on unchanged: music and sound effects usually come as `sid://...`, fonts and visual materials as `vimo://...`.
 
 Describe only what the result says. Never guess a track's mood, tempo or sound from its title, and never rank items by how well they fit when the results carry no descriptive information. If you can't tell which items fit, say so and suggest the user listen to them in CapCut.
 

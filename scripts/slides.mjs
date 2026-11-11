@@ -611,7 +611,7 @@ export function slideUploads(uploads, count) {
 }
 
 // Captions sit a little above the bottom edge in a smaller size, so they don't cover slide content.
-const SLIDE_CAPTION_STYLE = { position_y: -0.7, font_size: 10 }
+const SLIDE_CAPTION_STYLE = { position_y: -0.75, font_size: 5 }
 
 export function videoPlan({ slides, ratio, uploads, seconds = 4, notesAsCaptions = false, captions = null, font = null }) {
   if (font !== null && !/^vimo:\/\/\d+$/.test(font)) throw new Error('--font must be a CapCut font stdraft_uri such as vimo://123')
