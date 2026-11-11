@@ -88,6 +88,8 @@ Edit only what was asked, in the same file, keeping the user's own changes. Run 
 
 Only when the user asks for a video or slideshow. This makes a CapCut cloud draft with one still image per slide. The user then adds transitions and exports the video in CapCut. Saving a draft costs no credits.
 
+Before the first CapCut account step in this conversation, check the sign-in with `capcut_get_profile` as the `capcut-connect` skill describes.
+
 1. Ask, in one question, how long each slide should show (default 4 seconds, or `data-seconds` per slide), whether they want background music, and whether to show the speaker notes as captions. Captions work best when the notes are short sentences.
 2. `S export --file <deck> --format png --scale video --out <tmp>/video-slides` renders 1080-pixel-tall slides (1920 x 1080 for 16:9).
 3. Upload every PNG in one batch with the `capcut-upload` skill. Save the upload script's JSON output to `<tmp>/uploads.json`.
