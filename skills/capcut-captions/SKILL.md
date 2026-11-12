@@ -30,6 +30,10 @@ CapCut transcribes mainly one language per pass, and on a mixed-language video i
 
 If the user did not mention languages and the result looks sparse for the video's length, say that other languages may have been skipped and offer to run them.
 
+### Check for phantom captions
+
+Recognition sometimes returns a short cue in a near-silent stretch, such as "take care" at the very end. When ffmpeg is available and a cue looks out of place (very short, at the end, or unrelated to the rest), measure that stretch: `ffmpeg -ss <start> -t <length> -i <file> -af volumedetect -f null -`. If its mean volume is below about -45 dB, it is probably not speech: tell the user, and leave the cue out unless they want it.
+
 ### Never invent captions
 
 Captions must come from CapCut's recognition. Never fill a missing language with your own translation, guess or paraphrase, and never save one under a language file name. Translate only when the user explicitly asks for a translation, then label it as one in the reply and the file name, for example `<video>.hi.translated.srt`.

@@ -353,16 +353,65 @@ test('music: start offset, sound effects and lowering it under speech', () => {
   const whoosh = draft.segments.find(s => s.attributes?.source === 'sid://whoosh')
   assert.deepEqual([whoosh.attributes.meta_type, whoosh.attributes.auto_loop], ['SOUND', false])
   assert.match(changes[1], /at 3200 ms/)
-  // The song plays project 0-4000 from source 30000; duck project 1000-2000 to 25%.
+  // The song plays project 0-4000 from source 30000; duck project 1000-2000 to 25% with 200 ms crossfades.
   const ducked = applyOperations(draft, [{ op: 'duck', id: song.id, ranges: [{ start_ms: 1000, end_ms: 2000 }], fade_ms: 200 }]).draft
-  assert.deepEqual(ducked.segments.find(s => s.id === song.id).attributes['volume.keyframes'], [
-    { 'time.ms': 30800, value: 0.8 }, { 'time.ms': 31000, value: 0.2 }, { 'time.ms': 32000, value: 0.2 }, { 'time.ms': 32200, value: 0.8 },
+  const parts = ducked.segments.filter(s => s.attributes?.source === 'sid://song').sort((x, y) => x.timeline['start.ms'] - y.timeline['start.ms'])
+  assert.deepEqual(parts.map(p => [p.timeline['start.ms'], p.timeline['duration.ms'], p.attributes.volume, p.attributes['start.ms'], p.attributes['end.ms']]), [
+    [0, 1100, 0.8, 30000, 31100],
+    [900, 1200, 0.2, 30900, 32100],
+    [1900, 2100, 0.8, 31900, 34000],
   ])
-  // Overlapping ranges merge; ranges are clipped to the segment.
+  assert.equal(parts[0].id, song.id, 'the first part keeps the original id')
+  assert.notEqual(parts[1].layout.layer, parts[0].layout.layer, 'overlapping parts sit on two layers')
+  assert.equal(parts[2].layout.layer, parts[0].layout.layer)
+  assert.deepEqual([parts[0].attributes['fade_out.ms'], parts[1].attributes['fade_in.ms'], parts[1].attributes['fade_out.ms'], parts[2].attributes['fade_in.ms']], [200, 200, 200, 200])
+  assert.ok(parts.every(p => !('volume.keyframes' in p.attributes)), 'no keyframes, which CapCut drops')
+  // Close ranges merge, ranges are clipped to the track, and a very short dip is widened to one fade.
   const merged = applyOperations(sampleDraft(), [{ op: 'duck', id: 'music', ranges: [{ start_ms: 1000, end_ms: 2000 }, { start_ms: 2100, end_ms: 9000 }], to: 0.5 }]).draft
-  assert.deepEqual(merged.segments.find(s => s.id === 'music').attributes['volume.keyframes'].map(f => f['time.ms']), [700, 1000, 2000, 2100, 5000])
+  assert.deepEqual(merged.segments.filter(s => s.type === 'AUDIO').map(p => p.attributes.volume), [0.5, 0.25])
+  const blip = applyOperations(sampleDraft(), [{ op: 'duck', id: 'music', ranges: [{ start_ms: 2500, end_ms: 2550 }] }]).draft
+  const low = blip.segments.find(s => s.type === 'AUDIO' && s.attributes.volume < 0.5)
+  assert.ok(low.timeline['duration.ms'] >= 300)
   assert.deepEqual(validate(ducked), [])
-  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'duck', id: 'title', ranges: [{ start_ms: 0, end_ms: 1 }] }]), /no sound/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'duck', id: 'clip_a', ranges: [{ start_ms: 0, end_ms: 1000 }] }]), /works on music and sound/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'duck', id: 'title', ranges: [{ start_ms: 0, end_ms: 1 }] }]), /works on music and sound/)
   assert.throws(() => applyOperations(sampleDraft(), [{ op: 'duck', id: 'music', ranges: [{ start_ms: 9000, end_ms: 9500 }] }]), /None of the ranges/)
   assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_audio', source: 'sid://x', kind: 'voice' }]), /kind must be/)
+})
+
+test('clips, images and text share layers: captions avoid an overlay on layer 1', () => {
+  // A read-back-style draft: CapCut renumbered layers into one sequence (logo 1, title 2).
+  const d = sampleDraft()
+  d.segments.push({ id: 'logo', type: 'VIDEO', parent_id: 'draft', timeline: { 'start.ms': 0, 'duration.ms': 5000 }, layout: { layer: 1 }, attributes: { source: 'tos://logo', meta_type: 'photo' } })
+  d.segments.find(s => s.id === 'title').layout.layer = 2
+  const { draft } = applyOperations(d, [
+    { op: 'add_captions', cues: [{ start_ms: 0, end_ms: 1000, text: 'One' }, { start_ms: 1000, end_ms: 2000, text: 'Two' }] },
+  ])
+  const caps = draft.segments.filter(s => s.id.startsWith('caption_'))
+  assert.ok(caps.every(c => c.layout.layer === 3), 'captions skip the logo (1) and the title (2)')
+  assert.deepEqual(validate(draft), [])
+  // A caption on the logo's layer is caught locally, before CapCut rejects the save.
+  const clash = structuredClone(draft)
+  clash.segments.find(s => s.id === 'caption_0').layout.layer = 1
+  assert.match(validate(clash).join('\n'), /caption_0 overlap on layer 1/)
+  // CapCut's read-back spreads captions over layers (here 3 and 4); reset puts them back on one free layer.
+  caps[1].layout.layer = 4
+  const { draft: reset } = applyOperations(draft, [{ op: 'reset_caption_layers' }])
+  assert.ok(reset.segments.filter(s => s.id.startsWith('caption_')).every(c => c.layout.layer === 3))
+  assert.deepEqual(validate(reset), [])
+  // A new title goes above everything; an explicit caption layer that clashes is refused.
+  const titled = applyOperations(reset, [{ op: 'add_text', content: 'Hi', start_ms: 0, duration_ms: 500 }]).draft
+  assert.ok(titled.segments.find(s => s.attributes?.content === 'Hi').layout.layer >= 1000)
+  assert.throws(() => applyOperations(d, [{ op: 'add_captions', layer: 1, cues: [{ start_ms: 0, end_ms: 500, text: 'x' }] }]), /already has a clip, image or text/)
+})
+
+test('speed changes and moves drop the stale end.ms from read-back timelines', () => {
+  const d = sampleDraft()
+  d.segments[1].timeline['end.ms'] = 3000
+  d.segments[2].timeline['end.ms'] = 5000
+  const { draft } = applyOperations(d, [{ op: 'set_speed', id: 'clip_a', speed: 2 }])
+  assert.ok(draft.segments.slice(1, 3).every(s => !('end.ms' in s.timeline)))
+  const t = sampleDraft(); t.segments[4].timeline['end.ms'] = 2000
+  assert.equal('end.ms' in applyOperations(t, [{ op: 'place', id: 'title', start_ms: 100 }]).draft.segments[4].timeline, false)
+  assert.equal(applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', background_blur: true }]).draft.segments[1].attributes['background.blur'], 0.2)
 })

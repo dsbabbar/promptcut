@@ -30,6 +30,32 @@ If you find a new one, [open an issue](https://github.com/dsbabbar/promptcut/iss
 
 **What to do:** in the editor, drag the first caption onto the shared track if you want one track.
 
+### Animation over time is dropped
+
+**What happens:** a slow zoom on a photo, a fade-in on a title, or anything else that changes over time disappears when Claude saves the draft. The save succeeds, but the animation is gone.
+
+**Why:** these use keyframes, and CapCut's cloud drafts currently drop every keyframe on save.
+
+**What to do:** add zooms, fades and other movement in the CapCut editor, using the Animation panel or keyframes. promptcut lowers music under speech without keyframes, so that still works.
+
+### Text boxes don't show
+
+**What happens:** a background box behind text, such as a dark box behind a title, is saved but CapCut doesn't draw it.
+
+**What to do:** add the box in the CapCut editor (Text → Background), or use an outline and shadow instead, which do show.
+
+### Text styling can fade after later saves
+
+**What happens:** a title's outline and shadow can look fainter after Claude saves the draft a few more times. This hasn't been confirmed.
+
+**Why:** CapCut keeps per-letter style overrides for text, and they seem to lose detail on later saves.
+
+**What to do:** if it happens, ask Claude to restyle the text, or fix it in the editor after Claude's last change.
+
+### Sound effects are relabelled as music
+
+**What happens:** after a later save, a sound effect may be labelled as music in CapCut. It still plays the same.
+
 ### A deleted draft can't be saved to
 
 **What happens:** if you delete a draft in CapCut while Claude is still working on it, the next save fails with `save cloud draft failed` and `ret=2005`.

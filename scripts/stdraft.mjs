@@ -61,7 +61,25 @@ function uniqueId(draft, prefix) {
   }
 }
 
+// CapCut puts every visual segment (video clips, images, text, stickers, ...) in one shared set of layers, and
+// renumbers them into a single sequence on read-back. Audio has its own layers.
+function isVisual(s) {
+  return s && s.type !== 'AUDIO' && s.type !== 'DRAFT' && s.timeline && Number.isInteger(s.layout?.layer)
+}
+
+// The lowest layer from `from` up where no visual segment overlaps any of the given time ranges.
+function freeVisualLayer(draft, timelines, from, skip = new Set()) {
+  const visuals = draft.segments.filter(s => isVisual(s) && !skip.has(s))
+  for (let layer = from; ; layer++) {
+    if (!visuals.some(s => s.layout.layer === layer && timelines.some(t => overlaps(s.timeline, t)))) return layer
+  }
+}
+
 function nextLayer(draft, type, base) {
+  if (type === 'TEXT') {
+    const layers = draft.segments.filter(isVisual).map(s => s.layout.layer)
+    return Math.max(base - 1, ...layers) + 1
+  }
   const layers = draft.segments.filter(s => s.type === type).map(s => s.layout?.layer ?? base - 1)
   return Math.max(base - 1, ...layers) + 1
 }
@@ -72,11 +90,7 @@ function overlaps(a, b) {
 
 // The lowest layer from CAPTION_LAYER up where no existing TEXT segment overlaps the new cues in time.
 function captionLayer(draft, timelines) {
-  const texts = draft.segments.filter(s => s.type === 'TEXT' && s.timeline)
-  for (let layer = CAPTION_LAYER; ; layer++) {
-    const onLayer = texts.filter(s => (s.layout?.layer ?? -1) === layer)
-    if (!onLayer.some(s => timelines.some(t => overlaps(s.timeline, t)))) return layer
-  }
+  return freeVisualLayer(draft, timelines, CAPTION_LAYER)
 }
 
 function requireMs(value, name, { min = 0 } = {}) {
@@ -113,6 +127,8 @@ function requireNumber(value, name, min, max) {
 }
 
 const ALIGN = { left: 0, center: 1, right: 2 }
+// In a real draft, background.blur 0.5 looked strong (shapes unrecognisable); 0.2 is a soft default.
+const SOFT_BLUR = 0.2
 
 // Text style fields shared by add_text, add_captions (as style) and update. Friendly names map to CapCut's
 // TEXT attributes; outline and shadow defaults are the values CapCut uses on its own captions.
@@ -173,7 +189,7 @@ function applyClipLook(s, op, changed = []) {
   }
   if (op.background_blur !== undefined || op.background_color !== undefined) {
     if (s.type !== 'VIDEO') throw new Error('background fill works only on video clips and images')
-    if (op.background_blur !== undefined) { a['background.blur'] = requireNumber(op.background_blur, 'background_blur', 0, 1); delete a['background.color']; changed.push('background blur') }
+    if (op.background_blur !== undefined) { a['background.blur'] = op.background_blur === true ? SOFT_BLUR : requireNumber(op.background_blur, 'background_blur', 0, 1); delete a['background.color']; changed.push('background blur') }
     if (op.background_color !== undefined) { a['background.color'] = requireColor(op.background_color, 'background_color'); delete a['background.blur']; changed.push('background colour') }
   }
   return changed
@@ -181,10 +197,7 @@ function applyClipLook(s, op, changed = []) {
 
 // The lowest layer from 1 up where no other video clip or image overlaps the given time range.
 function overlayLayer(draft, timeline) {
-  const visuals = draft.segments.filter(s => s.type === 'VIDEO' && s.timeline)
-  for (let layer = 1; ; layer++) {
-    if (!visuals.some(s => s.layout?.layer === layer && overlaps(s.timeline, timeline))) return layer
-  }
+  return freeVisualLayer(draft, [timeline], 1)
 }
 
 // Where a new video clip or image goes: the main track (appended unless start_ms is given) or, with overlay
@@ -201,7 +214,7 @@ function visualPlacement(draft, op, duration) {
   const timeline = { 'start.ms': start, 'duration.ms': duration }
   if (op.layer !== undefined && !(Number.isInteger(op.layer) && op.layer >= 1)) throw new Error('layer must be a whole number of at least 1')
   const layer = op.layer ?? overlayLayer(draft, timeline)
-  if (draft.segments.some(s => s.type === 'VIDEO' && s.layout?.layer === layer && s.timeline && overlaps(s.timeline, timeline))) throw new Error(`Layer ${layer} already has a clip at that time`)
+  if (draft.segments.some(s => isVisual(s) && s.layout.layer === layer && overlaps(s.timeline, timeline))) throw new Error(`Layer ${layer} already has a clip, image or text at that time`)
   const layout = { layer }
   for (const key of ['position_x', 'position_y']) {
     if (op[key] !== undefined) layout[key] = requireNumber(op[key], key, -2, 2)
@@ -309,11 +322,13 @@ function retime(draft, s) {
   const duration = Math.max(1, Math.round((a['end.ms'] - a['start.ms']) / speedOf(s)))
   const delta = duration - s.timeline['duration.ms']
   s.timeline['duration.ms'] = duration
+  delete s.timeline['end.ms'] // CapCut's read-back adds end.ms; duration.ms wins, so drop the stale value
   let moved = 0
   if (delta !== 0 && s.layout?.layer === 0) {
     for (const other of draft.segments) {
       if (other !== s && other.type === 'VIDEO' && other.layout?.layer === 0 && other.timeline && other.timeline['start.ms'] >= oldEnd) {
         other.timeline['start.ms'] += delta
+        delete other.timeline['end.ms']
         moved++
       }
     }
@@ -368,12 +383,19 @@ export function validate(draft) {
       errors.push(`Main-track clips ${prev.id} and ${mainTrack[i].id} overlap`)
     }
   }
-  const overlays = draft.segments.filter(s => s.type === 'VIDEO' && s.timeline && Number.isInteger(s.layout?.layer) && s.layout.layer > 0)
-  for (let i = 0; i < overlays.length; i++) {
-    for (let j = i + 1; j < overlays.length; j++) {
-      if (overlays[i].layout.layer === overlays[j].layout.layer && overlaps(overlays[i].timeline, overlays[j].timeline)) {
-        errors.push(`Overlays ${overlays[i].id} and ${overlays[j].id} overlap on layer ${overlays[i].layout.layer}`)
+  // Clips, images and text share layers in CapCut; two on the same layer must not overlap in time.
+  const visuals = draft.segments.filter(s => isVisual(s) && !(s.type === 'VIDEO' && s.layout.layer === 0))
+  for (let i = 0; i < visuals.length; i++) {
+    for (let j = i + 1; j < visuals.length; j++) {
+      if (visuals[i].layout.layer === visuals[j].layout.layer && overlaps(visuals[i].timeline, visuals[j].timeline)) {
+        errors.push(`${visuals[i].id} and ${visuals[j].id} overlap on layer ${visuals[i].layout.layer} (clips, images and text share layers in CapCut)`)
       }
+    }
+  }
+  const main = draft.segments.filter(s => s.type === 'VIDEO' && s.layout?.layer === 0 && s.timeline)
+  for (const m of main) {
+    for (const o of draft.segments.filter(x => isVisual(x) && x.type !== 'VIDEO' && x.layout.layer === 0)) {
+      if (overlaps(m.timeline, o.timeline)) errors.push(`${o.id} is on layer 0 with the main track`)
     }
   }
   return errors
@@ -414,6 +436,7 @@ const OPERATIONS = {
     })
     if (op.layer !== undefined && !(Number.isInteger(op.layer) && op.layer >= 1)) throw new Error('layer must be a whole number of at least 1')
     const layer = op.layer ?? captionLayer(draft, timelines)
+    if (op.layer !== undefined && freeVisualLayer(draft, timelines, op.layer) !== op.layer) throw new Error(`Layer ${op.layer} already has a clip, image or text during these captions`)
     const added = []
     for (const [i, cue] of op.cues.entries()) {
       const start = requireMs(cue.start_ms, `cue ${i + 1} start_ms`)
@@ -545,6 +568,7 @@ const OPERATIONS = {
   place(draft, op) {
     const s = find(draft, op.id)
     const changed = []
+    if (op.start_ms !== undefined || op.duration_ms !== undefined) delete s.timeline['end.ms'] // stale once moved or trimmed
     if (op.start_ms !== undefined) { s.timeline['start.ms'] = requireMs(op.start_ms, 'start_ms'); changed.push('start') }
     if (op.duration_ms !== undefined) {
       const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
@@ -574,14 +598,27 @@ const OPERATIONS = {
       .filter(s => s.type === 'TEXT' && s.timeline && typeof s.id === 'string' && s.id.startsWith('caption'))
       .sort((a, b) => a.timeline['start.ms'] - b.timeline['start.ms'])
     if (captions.length === 0) throw new Error('The draft has no captions (TEXT segments whose id starts with "caption")')
-    const placed = []
+    // Group captions that don't overlap each other, then give each group the lowest layer from `base` that no
+    // other clip, image or text uses during those captions (CapCut shares layers between them).
+    const groups = []
     for (const s of captions) {
-      let layer = base
-      while (placed.some(p => p.layer === layer && overlaps(p.timeline, s.timeline))) layer++
-      s.layout = { ...(s.layout ?? {}), layer }
-      placed.push({ layer, timeline: s.timeline })
+      const group = groups.find(g => !g.some(c => overlaps(c.timeline, s.timeline)))
+      if (group) group.push(s)
+      else groups.push([s])
     }
-    const used = [...new Set(placed.map(p => p.layer))].sort((a, b) => a - b)
+    const skip = new Set(captions)
+    const used = []
+    for (const group of groups) {
+      let layer = base
+      for (;;) {
+        layer = freeVisualLayer(draft, group.map(c => c.timeline), layer, skip)
+        if (!used.includes(layer)) break
+        layer++
+      }
+      for (const c of group) c.layout = { ...(c.layout ?? {}), layer }
+      used.push(layer)
+    }
+    used.sort((a, b) => a - b)
     return `Put ${captions.length} captions on layer${used.length > 1 ? 's' : ''} ${used.join(', ')}`
   },
 
@@ -625,38 +662,69 @@ const OPERATIONS = {
     return `${s.id} zooms from ${from}x to ${to}x over ${(end / 1000).toFixed(1)}s${pan}`
   },
 
-  // {op, id, ranges: [{start_ms, end_ms}], to?: 0.25, fade_ms?: 300}: lowers a music track or clip's volume to
-  // `to` (a fraction of its normal volume) during each project-time range, for speech or a key moment, with
-  // short fades in and out. Replaces any earlier volume keyframes on that segment.
+  // {op, id, ranges: [{start_ms, end_ms}], to?: 0.25, fade_ms?: 300}: lowers a music or sound track to `to`
+  // (a fraction of its volume) during each project-time range, for speech or a key moment.
+  // CapCut's cloud drafts drop volume keyframes, so the track is split into back-to-back parts instead: quieter
+  // parts during the ranges, and short crossfades (overlapping parts on two layers) at each change.
   duck(draft, op) {
     const s = find(draft, op.id)
-    if (!['AUDIO', 'VIDEO'].includes(s.type) || s.attributes?.meta_type === 'photo') throw new Error(`${op.id} has no sound to lower`)
+    if (s.type !== 'AUDIO') throw new Error(`${op.id} is ${s.type}; duck works on music and sound tracks. Lower a video clip's own sound with update volume.`)
     if (!Array.isArray(op.ranges) || op.ranges.length === 0) throw new Error('ranges must be a non-empty array of {start_ms, end_ms}')
-    const level = s.attributes.volume ?? 1
-    const low = level * requireNumber(op.to ?? 0.25, 'to', 0, 1)
+    const a = s.attributes
+    const level = a.volume ?? 1
+    const low = Math.round(level * requireNumber(op.to ?? 0.25, 'to', 0, 1) * 1000) / 1000
     const fade = requireMs(op.fade_ms ?? 300, 'fade_ms')
-    const segStart = s.timeline['start.ms'], segEnd = segStart + s.timeline['duration.ms']
-    const ranges = op.ranges.map((r, i) => {
+    const S = s.timeline['start.ms'], E = S + s.timeline['duration.ms']
+    let ranges = op.ranges.map((r, i) => {
       const start = requireMs(r.start_ms, `range ${i + 1} start_ms`)
       const end = requireMs(r.end_ms, `range ${i + 1} end_ms`, { min: start + 1 })
-      return [Math.max(start, segStart), Math.min(end, segEnd)]
-    }).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])
+      return [Math.max(start, S), Math.min(end, E)]
+    }).filter(([x, y]) => y > x).map(([x, y]) => {
+      // A dip shorter than one fade can't crossfade in and out; widen it to the fade length.
+      if (y - x >= fade) return [x, y]
+      const mid = (x + y) / 2
+      return [Math.max(S, Math.round(mid - fade / 2)), Math.min(E, Math.round(mid + fade / 2))]
+    }).sort((x, y) => x[0] - y[0])
     if (ranges.length === 0) throw new Error(`None of the ranges fall within ${s.id} on the timeline`)
-    const points = []
-    for (const [start, end] of ranges) {
-      const down = Math.max(segStart, start - fade), up = Math.min(segEnd, end + fade)
-      if (points.length && points.at(-1)[0] >= down) points.pop() // merge with the previous range
-      else points.push([down, level])
-      points.push([start, low], [end, low], [up, level])
+    // Merge ranges closer together than a crossfade, so parts are never shorter than the fades.
+    ranges = ranges.reduce((out, r) => {
+      if (out.length && r[0] - out.at(-1)[1] < 2 * fade) out.at(-1)[1] = Math.max(out.at(-1)[1], r[1])
+      else out.push([...r])
+      return out
+    }, [])
+    // Back-to-back parts covering [S, E]: [start, end, volume].
+    const parts = []
+    let at = S
+    for (const [x, y] of ranges) {
+      if (x - at > 0) parts.push([at, x, level])
+      parts.push([x, y, low])
+      at = y
     }
-    const frames = []
-    for (const [t, v] of points) {
-      const time = sourceTime(s, t)
-      if (frames.length && time <= frames.at(-1)['time.ms']) continue
-      frames.push({ 'time.ms': time, value: v })
-    }
-    s.attributes['volume.keyframes'] = frames
-    return `${s.id} drops to ${Math.round((low / (level || 1)) * 100)}% of its volume during ${ranges.length} range${ranges.length > 1 ? 's' : ''}`
+    if (E > at) parts.push([at, E, level])
+    const speed = typeof a.speed === 'number' && a.speed > 0 ? a.speed : 1
+    const src0 = a['start.ms'] ?? 0
+    const altLayer = nextLayer(draft, 'AUDIO', AUDIO_LAYER_BASE)
+    const half = Math.floor(fade / 2)
+    const ids = new Set(draft.segments.map(x => x.id))
+    const partId = () => { for (let n = 0; ; n++) { const id = `${s.id}_part_${n}`; if (!ids.has(id)) { ids.add(id); return id } } }
+    const made = parts.map(([x, y, volume], i) => {
+      const first = i === 0, last = i === parts.length - 1
+      // Each inner boundary overlaps both neighbours by half a fade, for a crossfade.
+      const start = first ? x : Math.max(S, x - half)
+      const end = last ? y : Math.min(E, y + half)
+      const attributes = { ...a, volume, 'start.ms': Math.round(src0 + (start - S) * speed), 'end.ms': Math.round(src0 + (end - S) * speed) }
+      delete attributes['volume.keyframes']
+      delete attributes['duration.ms']
+      if (first) delete attributes['fade_in.ms']
+      if (!first) attributes['fade_in.ms'] = Math.min(fade, end - start)
+      if (last) { delete attributes['fade_out.ms']; if (a['fade_out.ms'] !== undefined) attributes['fade_out.ms'] = a['fade_out.ms'] } else attributes['fade_out.ms'] = Math.min(fade, end - start)
+      if (first && a['fade_in.ms'] !== undefined) attributes['fade_in.ms'] = a['fade_in.ms']
+      const timeline = { 'start.ms': start, 'duration.ms': end - start }
+      const layout = { ...(s.layout ?? {}), layer: i % 2 === 0 ? s.layout.layer : altLayer }
+      return { ...s, id: first ? s.id : partId(), timeline, layout, attributes }
+    })
+    draft.segments.splice(draft.segments.indexOf(s), 1, ...made)
+    return `Split ${s.id} into ${made.length} parts so it drops to ${Math.round((low / (level || 1)) * 100)}% during ${ranges.length} range${ranges.length > 1 ? 's' : ''}, with ${fade} ms crossfades`
   },
 
   // {op, id, speed}: plays a video clip at a constant speed (2 = twice as fast, 0.5 = half speed, 1 = normal).
