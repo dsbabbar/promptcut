@@ -101,7 +101,9 @@ test('appends video, updates, moves and removes segments', () => {
     { op: 'remove', id: 'clip_a' },
   ])
   const added = draft.segments.find(s => s.id === 'video_0')
-  assert.deepEqual(added.timeline, { 'start.ms': 5000, 'duration.ms': 2000 })
+  // Added at 5000, then the main track closed up: clip_b got 1000 ms shorter and clip_a (3000 ms) was removed.
+  assert.deepEqual(added.timeline, { 'start.ms': 1000, 'duration.ms': 2000 })
+  assert.equal(draft.segments.find(s => s.id === 'clip_b').timeline['start.ms'], 0)
   const title = draft.segments.find(s => s.id === 'title')
   assert.equal(title.attributes.content, 'Hello world')
   assert.equal(title.attributes.text_color, '#FFCC00')
@@ -180,7 +182,7 @@ test('add_image appends still images to the main track', () => {
   const images = out.segments.filter(s => s.attributes?.meta_type === 'photo')
   assert.equal(images.length, 2)
   assert.equal(images[0].attributes.source, 'tos://tos-x/slide1')
-  assert.deepEqual(images[1].timeline, { 'start.ms': 4000, 'duration.ms': 2500 })
+  assert.deepEqual(images[1].timeline, { 'start.ms': 3000, 'duration.ms': 2500 }, 'moved up when image_0 got shorter')
   assert.equal(images[0].timeline['duration.ms'], 3000)
   assert.ok(!('end.ms' in images[0].attributes), 'a still image has no source end')
   assert.equal(images[0].type, 'VIDEO')
@@ -433,8 +435,12 @@ test('transitions go between touching clips on one track, and are replaced, remo
   const removed = applyOperations(draft, [{ op: 'remove', id: 'clip_b' }])
   assert.equal('transition' in removed.draft.segments[1].attributes, false)
   assert.match(removed.changes[0], /transition on clip_a was removed/)
-  const moved = applyOperations(draft, [{ op: 'place', id: 'clip_b', start_ms: 3500 }])
-  assert.equal('transition.duration.ms' in moved.draft.segments[1].attributes, false)
+  // CapCut keeps the main track gap-free, so a main-track clip can't be moved on its own.
+  assert.throws(() => applyOperations(draft, [{ op: 'place', id: 'clip_b', start_ms: 3500 }]), /gap-free/)
+  // Trimming the first clip keeps the clips touching, so the transition stays.
+  const trimmed = applyOperations(draft, [{ op: 'place', id: 'clip_a', duration_ms: 2000 }]).draft
+  assert.equal(trimmed.segments[1].attributes.transition, 'vimo://t1')
+  assert.equal(trimmed.segments[2].timeline['start.ms'], 2000)
 })
 
 test('filters and effects cover a range, one clip or the whole video, on a layer above what they cover', () => {
@@ -533,16 +539,81 @@ test('blend, cutout and canvas size', () => {
     { op: 'set_canvas', ratio: '16:9' },
   ])
   const b = draft.segments.find(s => s.id === 'clip_b').attributes
-  assert.deepEqual([b.blend_mode, b.blend_intensity, b.matting], ['screen', 0.7, true])
+  // CapCut stores Screen as a library resource and the strength as the clip's opacity.
+  assert.deepEqual([b.blend_mode, 'blend_intensity' in b, b.matting], ['vimo://6758325170760323597', false, true])
+  assert.equal(draft.segments.find(s => s.id === 'clip_b').layout.alpha, 0.7)
   assert.deepEqual(draft.segments[0].attributes, { width: 1920, height: 1080, ratio_type: '16:9' })
   assert.match(summarize(draft), /Canvas 1920x1080 \(16:9\)/)
-  assert.match(summarize(draft), /blend screen background removed/)
+  assert.match(summarize(draft), /blend screen at 70% background removed/)
   const plain = applyOperations(draft, [{ op: 'update', id: 'clip_b', blend_mode: 'normal', cutout: false }, { op: 'set_canvas', width: 1000, height: 1000 }]).draft
   assert.deepEqual(['blend_mode', 'blend_intensity', 'matting'].filter(k => k in plain.segments[2].attributes), [])
   assert.equal(plain.segments[0].attributes.ratio_type, 'custom')
-  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_b', blend_mode: 'glow' }]), /blend_mode must be one of/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_b', blend_mode: 'multiply' }]), /blend_mode must be screen, normal, or/)
+  // A mode applied in the editor can be reused by its source.
+  assert.equal(applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_b', blend_mode: 'vimo://123' }]).draft.segments[2].attributes.blend_mode, 'vimo://123')
+  // CapCut turns cutout into an AI_MATTING segment under the clip; the summary shows it and cutout: false removes it.
+  const readBack = sampleDraft()
+  readBack.segments.push({ id: 'm1', type: 'AI_MATTING', parent_id: 'clip_b', attributes: {} })
+  assert.match(summarize(readBack), /clip_b .* background removed/)
+  assert.ok(!applyOperations(readBack, [{ op: 'update', id: 'clip_b', cutout: false }]).draft.segments.some(s => s.id === 'm1'))
   assert.throws(() => applyOperations(sampleDraft(), [{ op: 'set_canvas', ratio: '5:4' }]), /ratio must be one of/)
   assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'title', cutout: true }]), /only on video clips/)
   const bad = sampleDraft(); bad.segments[0].attributes.ratio_type = '5:4'
   assert.match(validate(bad).join(), /not one CapCut accepts/)
+})
+
+test('0.4.1: text effects reach style copies, and keys CapCut dropped from copies are restored', () => {
+  const d = sampleDraft()
+  d.segments[4].attributes.border_width = 0.08
+  d.segments[4].attributes.border_color = '#000000'
+  d.segments.push({ id: 'p1', type: 'PATCH', parent_id: 'title', attributes: { letter_start: 0, letter_end: 5, border_width: 0.02 } })
+  const { draft, changes } = applyOperations(d, [{ op: 'update', id: 'title', text_effect: 'vimo://gold' }])
+  const p1 = draft.segments.find(s => s.id === 'p1').attributes
+  assert.equal(p1.flower, 'vimo://gold')
+  assert.equal(p1.border_color, '#000000', 'a dropped key is filled back in')
+  assert.equal(p1.border_width, 0.02, 'a value the copy has is left alone')
+  assert.match(changes.join('\n'), /Restored .* 1 per-letter style copy/)
+  const off = applyOperations(draft, [{ op: 'update', id: 'title', text_effect: null }]).draft
+  assert.equal('flower' in off.segments.find(s => s.id === 'p1').attributes, false)
+})
+
+test('0.4.1: removing or trimming a main-track clip closes the gap and moves later items with it', () => {
+  const d = sampleDraft()
+  d.segments.push(
+    { id: 'caption_9', type: 'TEXT', parent_id: 'draft', timeline: { 'start.ms': 3500, 'duration.ms': 1000 }, layout: { layer: 1 }, attributes: { content: 'Over clip b' } },
+    { id: 'early', type: 'TEXT', parent_id: 'draft', timeline: { 'start.ms': 500, 'duration.ms': 1000 }, layout: { layer: 2 }, attributes: { content: 'Over clip a' } },
+  )
+  const { draft, changes } = applyOperations(d, [{ op: 'remove', id: 'clip_a' }])
+  const at = id => draft.segments.find(s => s.id === id).timeline['start.ms']
+  assert.equal(at('clip_b'), 0)
+  assert.equal(at('caption_9'), 500, 'the caption over clip b moved with it')
+  assert.equal(at('music'), 0, 'music that started earlier stays')
+  assert.match(changes[0], /main track closed up/)
+  assert.match(changes[0], /check them: title, early/)
+  const textGone = applyOperations(sampleDraft(), [{ op: 'remove', id: 'title' }]).changes[0]
+  assert.doesNotMatch(textGone, /gap/)
+  const sped = applyOperations(d, [{ op: 'set_speed', id: 'clip_a', speed: 2 }]).draft
+  assert.equal(sped.segments.find(s => s.id === 'caption_9').timeline['start.ms'], 2000)
+})
+
+test('0.4.1: duck keeps the track fade-out on a part long enough for it', () => {
+  const d = sampleDraft()
+  d.segments[3].attributes['fade_out.ms'] = 2000
+  const { draft } = applyOperations(d, [{ op: 'duck', id: 'music', ranges: [{ start_ms: 1000, end_ms: 4350 }] }])
+  const parts = draft.segments.filter(s => s.type === 'AUDIO').sort((a, b) => a.timeline['start.ms'] - b.timeline['start.ms'])
+  assert.equal(parts.length, 2, 'the 650 ms tail after the speech folds into the quiet part')
+  assert.equal(parts.at(-1).attributes['fade_out.ms'], 2000)
+})
+
+test('0.4.1: vertical canvases warn about safe zones and long template lines', () => {
+  const d = sampleDraft()
+  const { draft } = applyOperations(d, [
+    { op: 'add_captions', cues: [{ start_ms: 0, end_ms: 1000, text: 'Safe' }] },
+    { op: 'add_text', content: 'Low', start_ms: 0, duration_ms: 1000, position_y: -0.8 },
+    { op: 'add_captions', template: 'vimo://k', cues: [{ start_ms: 2000, end_ms: 3000, text: 'This caption is far too long to fit on one line' }] },
+  ])
+  assert.equal(draft.segments.find(s => s.id === 'caption_0').layout.position_y, -0.45, 'captions sit above the Reels and TikTok bar')
+  const text = summarize(draft)
+  assert.match(text, /buttons and captions may cover it: text_0/)
+  assert.match(text, /may run off the frame .*: caption_1/)
 })
