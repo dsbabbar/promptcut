@@ -320,7 +320,7 @@ test('text style: outline, shadow, box, alignment and spacing', () => {
   const title = draft.segments.find(s => s.id === 'title')
   assert.deepEqual([title.attributes.shadow_alpha, title.attributes.text_alpha], [0.8, 0.9])
   assert.deepEqual(validate(draft), [])
-  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', shadow: true }]), /only on TEXT/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', shadow: true }]), /only on text/)
   assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'title', alignment: 'middle' }]), /alignment must be/)
 })
 
@@ -414,4 +414,135 @@ test('speed changes and moves drop the stale end.ms from read-back timelines', (
   const t = sampleDraft(); t.segments[4].timeline['end.ms'] = 2000
   assert.equal('end.ms' in applyOperations(t, [{ op: 'place', id: 'title', start_ms: 100 }]).draft.segments[4].timeline, false)
   assert.equal(applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', background_blur: true }]).draft.segments[1].attributes['background.blur'], 0.2)
+})
+
+test('transitions go between touching clips on one track, and are replaced, removed and cleaned up', () => {
+  const { draft, changes } = applyOperations(sampleDraft(), [{ op: 'add_transition', id: 'clip_a', source: 'vimo://t1' }])
+  const a = draft.segments.find(s => s.id === 'clip_a').attributes
+  assert.equal(a.transition, 'vimo://t1')
+  assert.equal(a['transition.duration.ms'], 500)
+  assert.match(changes[0], /into clip_b/)
+  const replaced = applyOperations(draft, [{ op: 'add_transition', id: 'clip_a', source: 'vimo://t2', duration_ms: 800 }]).draft
+  assert.equal(replaced.segments[1].attributes.transition, 'vimo://t2')
+  assert.equal(replaced.segments[1].attributes['transition.duration.ms'], 800)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_transition', id: 'clip_b', source: 'vimo://t1' }]), /No clip starts right where clip_b ends/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_transition', id: 'clip_a', source: 'vimo://t1', duration_ms: 2500 }]), /at most 2000 ms/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_transition', id: 'clip_a', source: 'sid://x' }]), /vimo:\/\//)
+  const off = applyOperations(draft, [{ op: 'add_transition', id: 'clip_a', source: null }]).draft
+  assert.equal('transition' in off.segments[1].attributes, false)
+  const removed = applyOperations(draft, [{ op: 'remove', id: 'clip_b' }])
+  assert.equal('transition' in removed.draft.segments[1].attributes, false)
+  assert.match(removed.changes[0], /transition on clip_a was removed/)
+  const moved = applyOperations(draft, [{ op: 'place', id: 'clip_b', start_ms: 3500 }])
+  assert.equal('transition.duration.ms' in moved.draft.segments[1].attributes, false)
+})
+
+test('filters and effects cover a range, one clip or the whole video, on a layer above what they cover', () => {
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'add_filter', source: 'vimo://warm' },
+    { op: 'add_effect', source: 'vimo://glow', over: 'clip_b', intensity: 0.4 },
+    { op: 'add_filter', source: 'vimo://bw', start_ms: 1000, duration_ms: 500, intensity: 0.3 },
+  ])
+  const [whole, glow, bw] = ['filter_0', 'effect_0', 'filter_1'].map(id => draft.segments.find(s => s.id === id))
+  assert.deepEqual([whole.type, whole.timeline, whole.attributes.intensity], ['COLOR_FILTER', { 'start.ms': 0, 'duration.ms': 5000 }, 0.6])
+  assert.equal(whole.layout.layer, 1001, 'above the title on 1000')
+  assert.deepEqual([glow.type, glow.timeline, glow.attributes.effects_adjust_intensity], ['VIDEO_EFFECT', { 'start.ms': 3000, 'duration.ms': 2000 }, 0.4])
+  assert.equal(glow.layout.layer, 1002)
+  assert.equal(bw.layout.layer, 1002, 'the glow effect is later, so its layer is free here')
+  assert.deepEqual(validate(draft), [])
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_filter', source: 'vimo://x', start_ms: 4000, duration_ms: 2000 }]), /after the end of the video/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_filter', source: 'vimo://x', intensity: 2 }]), /intensity/)
+  const weaker = applyOperations(draft, [{ op: 'update', id: 'filter_0', intensity: 0.2 }, { op: 'update', id: 'effect_0', source: 'vimo://sparkle' }]).draft
+  assert.equal(weaker.segments.find(s => s.id === 'filter_0').attributes.intensity, 0.2)
+  assert.equal(weaker.segments.find(s => s.id === 'effect_0').attributes.source, 'vimo://sparkle')
+  // Captions added later avoid layers the filters use, and an effect attached under a clip is accepted.
+  const d = sampleDraft()
+  d.segments.push({ id: 'fx', type: 'VIDEO_EFFECT', parent_id: 'clip_a', attributes: { source: 'vimo://fx' } })
+  assert.deepEqual(validate(d), [])
+  assert.match(summarize(d), /with effect fx/)
+  const gone = applyOperations(d, [{ op: 'remove', id: 'clip_a' }])
+  assert.ok(!gone.draft.segments.some(s => s.id === 'fx'), 'the effect goes with its clip')
+})
+
+test('text templates, text effects, vertical text and bubbles', () => {
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'add_text_template', source: 'vimo://tpl', texts: ['Big Sale', 'This weekend'], start_ms: 0, duration_ms: 3000, position_y: 0.5, scale: 0.8 },
+    { op: 'update', id: 'title', text_effect: 'vimo://gold', vertical: true, bubble: 'vimo://cloud' },
+  ])
+  const t = draft.segments.find(s => s.type === 'TEXT_TEMPLATE')
+  assert.deepEqual(t.attributes, { source: 'vimo://tpl', contents: ['Big Sale', 'This weekend'] })
+  assert.deepEqual([t.layout.position_y, t.layout.scale_x, t.layout.scale_y], [0.5, 0.8, 0.8])
+  const title = draft.segments.find(s => s.id === 'title').attributes
+  assert.deepEqual([title.flower, title.type_setting, title.bubble], ['vimo://gold', 1, 'vimo://cloud'])
+  assert.deepEqual(validate(draft), [])
+  assert.match(summarize(draft), /texts \["Big Sale","This weekend"\]/)
+  const renamed = applyOperations(draft, [{ op: 'update', id: t.id, texts: ['Huge Sale', 'Today'] }, { op: 'update', id: 'title', text_effect: null }]).draft
+  assert.deepEqual(renamed.segments.find(s => s.id === t.id).attributes.contents, ['Huge Sale', 'Today'])
+  assert.equal('flower' in renamed.segments.find(s => s.id === 'title').attributes, false)
+  assert.throws(() => applyOperations(draft, [{ op: 'update', id: t.id, content: 'x' }]), /use texts/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_text_template', source: 'vimo://tpl', texts: [], start_ms: 0, duration_ms: 1 }]), /texts/)
+})
+
+test('captions carry word timings, and a caption template turns them into caption-template segments', () => {
+  const { draft } = applyOperations(sampleDraft(), [{ op: 'add_captions', cues: [
+    { start_ms: 1000, end_ms: 3000, text: 'Hello big world', words: [{ text: 'Hello', start_ms: 1000, end_ms: 1500 }, { text: 'big', start_ms: 1500, end_ms: 2000 }, { text: 'world', start_ms: 2000, end_ms: 3000 }] },
+    { start_ms: 3000, end_ms: 4000, text: 'Bye' },
+  ] }])
+  const [one, two] = draft.segments.filter(s => s.id.startsWith('caption_'))
+  assert.deepEqual(one.attributes.caption_timeline, [
+    { text: 'Hello ', 'start.ms': 0, 'end.ms': 500 }, { text: 'big ', 'start.ms': 500, 'end.ms': 1000 }, { text: 'world', 'start.ms': 1000, 'end.ms': 2000 },
+  ])
+  assert.equal(one.attributes.caption_timeline.map(w => w.text).join(''), one.attributes.content)
+  assert.deepEqual(two.attributes.caption_timeline, [{ text: 'Bye', 'start.ms': 0, 'end.ms': 1000 }])
+  assert.equal(one.attributes.font, 'vimo://7317175475195875841', 'a default library font')
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_captions', cues: [{ start_ms: 0, end_ms: 1000, text: 'Hi there', words: [{ text: 'Hi', start_ms: 0, end_ms: 500 }, { text: 'you', start_ms: 500, end_ms: 1000 }] }] }]), /don't match/)
+  // Rewriting the text rewrites the timings with it; a longer caption stretches a one-entry timing.
+  const edited = applyOperations(draft, [{ op: 'update', id: one.id, content: 'Hi world' }, { op: 'place', id: two.id, duration_ms: 1500 }]).draft
+  assert.deepEqual(edited.segments.find(s => s.id === one.id).attributes.caption_timeline, [{ text: 'Hi world', 'start.ms': 0, 'end.ms': 2000 }])
+  assert.equal(edited.segments.find(s => s.id === two.id).attributes.caption_timeline[0]['end.ms'], 1500)
+  assert.throws(() => applyOperations(draft, [{ op: 'place', id: one.id, duration_ms: 1200 }]), /update content first/)
+  const tpl = applyOperations(sampleDraft(), [{ op: 'add_captions', template: 'vimo://karaoke', cues: [{ start_ms: 0, end_ms: 1000, text: 'Sing' }] }, { op: 'reset_caption_layers' }]).draft
+  const sub = tpl.segments.find(s => s.type === 'SUBTITLE_TEMPLATE')
+  assert.deepEqual(sub.attributes, { source: 'vimo://karaoke', content: 'Sing', subtitle_timeline: [{ text: 'Sing', 'start.ms': 0, 'end.ms': 1000 }] })
+  assert.deepEqual(validate(tpl), [])
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_captions', template: 'vimo://k', font: 'vimo://1', cues: [{ start_ms: 0, end_ms: 1, text: 'x' }] }]), /brings its own look/)
+})
+
+test('style changes reach the per-letter style copies CapCut keeps, and text edits clip them', () => {
+  const d = sampleDraft()
+  d.segments[4].attributes.border_width = 0.06
+  d.segments.push(
+    { id: 'p1', type: 'PATCH', parent_id: 'title', attributes: { letter_start: 0, letter_end: 5, font: 'vimo://old', border_width: 0.06 } },
+    { id: 'p2', type: 'PATCH', parent_id: 'title', attributes: { letter_start: 3, letter_end: 5, font_size: 13 } },
+  )
+  assert.deepEqual(validate(d), [])
+  const { draft, changes } = applyOperations(d, [{ op: 'update', id: 'title', font: 'vimo://new', outline_width: 0.1, font_color: '#ff0000' }])
+  const [p1, p2] = ['p1', 'p2'].map(id => draft.segments.find(s => s.id === id).attributes)
+  assert.deepEqual([p1.font, p1.border_width, p1.font_color], ['vimo://new', 0.1, '#FF0000'])
+  assert.deepEqual([p2.font, p2.border_width, p2.font_color], ['vimo://new', 0.1, '#FF0000'])
+  assert.match(changes[0], /2 per-letter style copies/)
+  const short = applyOperations(d, [{ op: 'update', id: 'title', content: 'Hi' }])
+  assert.equal(short.draft.segments.find(s => s.id === 'p1').attributes.letter_end, 2)
+  assert.ok(!short.draft.segments.some(s => s.id === 'p2'), 'a copy past the new text is dropped')
+  assert.ok(!applyOperations(d, [{ op: 'remove', id: 'title' }]).draft.segments.some(s => s.type === 'PATCH'), 'copies go with their text')
+})
+
+test('blend, cutout and canvas size', () => {
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'update', id: 'clip_b', blend_mode: 'screen', blend_intensity: 0.7, cutout: true },
+    { op: 'set_canvas', ratio: '16:9' },
+  ])
+  const b = draft.segments.find(s => s.id === 'clip_b').attributes
+  assert.deepEqual([b.blend_mode, b.blend_intensity, b.matting], ['screen', 0.7, true])
+  assert.deepEqual(draft.segments[0].attributes, { width: 1920, height: 1080, ratio_type: '16:9' })
+  assert.match(summarize(draft), /Canvas 1920x1080 \(16:9\)/)
+  assert.match(summarize(draft), /blend screen background removed/)
+  const plain = applyOperations(draft, [{ op: 'update', id: 'clip_b', blend_mode: 'normal', cutout: false }, { op: 'set_canvas', width: 1000, height: 1000 }]).draft
+  assert.deepEqual(['blend_mode', 'blend_intensity', 'matting'].filter(k => k in plain.segments[2].attributes), [])
+  assert.equal(plain.segments[0].attributes.ratio_type, 'custom')
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_b', blend_mode: 'glow' }]), /blend_mode must be one of/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'set_canvas', ratio: '5:4' }]), /ratio must be one of/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'title', cutout: true }]), /only on video clips/)
+  const bad = sampleDraft(); bad.segments[0].attributes.ratio_type = '5:4'
+  assert.match(validate(bad).join(), /not one CapCut accepts/)
 })

@@ -61,7 +61,7 @@ CapCut stores desktop projects in its `Projects/com.lveditor.draft` folder: unde
 | **AI features** | CapCut AI: rough cuts, image and video generation, auto captions, template and material search | None from CapCut. Analysis uses local tools and Claude's own judgment. |
 | **Cost** | Some features spend CapCut credits (always quoted first, except rough cuts) | No CapCut credits |
 | **Cut precision** | CapCut's AI rough cut, or clip-level edits by Claude | Frame and word-level cuts from transcripts and silence detection (repeats, false starts, long pauses) |
-| **Effects and grading** | Text, captions, audio, main-track clips. No filters, transitions, keyframes or color adjustment yet. | Anything the desktop format can express that Claude can learn from your existing projects: keyframes (for example a dolly zoom), per-clip color adjustments, multiple audio tracks |
+| **Effects and grading** | Text, captions, audio, clips and overlays, transitions, CapCut filters, video and face effects, text templates. No keyframes or color adjustment yet. | Anything the desktop format can express that Claude can learn from your existing projects: keyframes (for example a dolly zoom), per-clip color adjustments, multiple audio tracks |
 | **Fonts and media** | CapCut library fonts and materials (`vimo://` IDs) | Fonts, sound effects and media already on your computer |
 | **Validation** | CapCut validates every save and rejects invalid drafts | No validation until you open the project. A wrong value can load but look wrong. |
 | **Preview** | Open the web editor link | Rough ffmpeg preview, then open CapCut |

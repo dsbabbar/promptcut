@@ -48,9 +48,9 @@ If you find a new one, [open an issue](https://github.com/dsbabbar/promptcut/iss
 
 **What happens:** a title's outline and shadow can look fainter after Claude saves the draft a few more times. This hasn't been confirmed.
 
-**Why:** CapCut keeps per-letter style overrides for text, and they seem to lose detail on later saves.
+**Why:** CapCut keeps per-letter style copies for text and treats them as the truth, so a style change made only on the text can be undone on save. Since 0.4.0, promptcut writes its style changes to those copies too, which should stop this.
 
-**What to do:** if it happens, ask Claude to restyle the text, or fix it in the editor after Claude's last change.
+**What to do:** if it still happens, ask Claude to restyle the text, or fix it in the editor after Claude's last change.
 
 ### Sound effects are relabelled as music
 

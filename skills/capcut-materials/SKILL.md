@@ -33,4 +33,16 @@ Do not invent materials. If nothing fits, say so and suggest a different descrip
 
 ## Adding materials to a video
 
-Music, sound effects and fonts can be added to a draft with the `capcut-draft` skill, using each item's `stdraft_uri`. Filters, transitions, video effects, face effects, text effects and text templates cannot be applied by promptcut yet: tell the user they can add the chosen item in the CapCut web editor by searching its title there.
+Every type can be added to a draft with the `capcut-draft` skill, using each item's `stdraft_uri` unchanged:
+
+| Type | Draft operation |
+| --- | --- |
+| `music`, `sound_effect` | `add_audio` (`kind` `music` or `sound`) |
+| `font` | `font` on text and captions |
+| `text_effect` | `text_effect` on text and captions |
+| `text_template` | `add_text_template` |
+| `transition` | `add_transition` |
+| `filter` | `add_filter` |
+| `video_effect`, `face_effect` | `add_effect` (a face effect is an ordinary video effect in a draft) |
+
+These were added in promptcut 0.4.0 and haven't all been checked in a real draft yet.
