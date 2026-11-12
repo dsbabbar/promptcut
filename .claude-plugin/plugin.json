@@ -1,6 +1,6 @@
 {
   "name": "promptcut",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Unofficial community plugin that connects Claude Code to CapCut's AI video tools: template search, image and video generation, captions, AI rough cuts, uploads, draft editing, and slide decks that export to PDF, PowerPoint or a CapCut slideshow video. Not affiliated with CapCut or ByteDance.",
   "author": {
     "name": "dsbabbar",
