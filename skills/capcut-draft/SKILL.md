@@ -53,7 +53,9 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
 4. **Save:** call `push_stdraft_snapshot` with `session_id`, `base_package_id` (the version you edited, or empty for a new draft) and `stdraft_json` (the new document as a string).
 5. **After a successful save:** keep the returned `server_package_id` as the new version. If `stdraft_json` is returned, save it as the new baseline document, otherwise call `get_stdraft_snapshot`. Tell the user what changed, in plain words, and give them `web_editor_url` with its `web_editor_text` label so they can review and export in the CapCut web editor. Saving a draft does not export a new video file.
 
-   After the first save of a new draft, also tell the user that the draft appears as "Untitled" in their CapCut apps, because CapCut's draft tools can't set a name, and that they can rename it in any CapCut app. Say this once per draft.
+   After the first save of a new draft, also tell the user, once per draft:
+   - **Names:** CapCut's draft tools can't set a name, and every save resets it. The CapCut desktop app shows "Untitled" and the web editor shows the date and time of the last save (such as 202611111913). A name the user gives the draft is lost at the next save, so they should rename it only after the last change.
+   - **Open it on the web first:** open the draft with the web editor link before opening it in the desktop app. Opened only in the desktop app, it gets a numbered name such as "(4)", and closing it there can create a separate copy. Those copies don't receive later saves; check before deleting any.
 
 ## Save errors
 

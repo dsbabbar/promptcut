@@ -118,7 +118,8 @@ A regular claude.ai chat or a cloud session cannot use promptcut, because CapCut
 - **Caption tracks:** CapCut usually shows the first caption on a track of its own and the rest together on a second track. Drag the first caption onto the shared track in the editor if you want one track.
 - **Uploaded images** land loose in CapCut's Media panel; there's no way to put them in a folder.
 - **Captions for mixed-language videos** may miss short phrases in the second language. promptcut never fills gaps with its own translation; it tells you which parts have no captions.
-- **Draft names:** new drafts appear as "Untitled" in your CapCut apps, because CapCut's draft tools can't set a name. Rename them in any CapCut app.
+- **Draft names:** CapCut's draft tools can't set a name, and every save resets it: the desktop app shows "Untitled" and the web editor shows the date and time of the last save. Rename a draft only after Claude's last change.
+- **Open drafts on the web first:** use the web editor link before opening a draft in the desktop app. A draft opened only in the desktop app gets a numbered name such as "(4)", and closing it there can create a separate copy that won't get later changes.
 - **Emoji** in draft text may appear as plain monochrome symbols in CapCut's editor.
 - **Fonts:** promptcut sets a CapCut library font on text it adds, so it looks the same in the web editor and the desktop app. Text without a font, or with a local font saved by the desktop app, can wrap differently between the two.
 - **AI rough cuts** may use subscription credits and do not show a quote before starting.

@@ -105,7 +105,7 @@ Before the first CapCut account step in this conversation, check the sign-in wit
    For slides that didn't come from a promptcut deck (for example images or a PDF the user exported from another app), write the same operations by hand: one `add_image` per slide, then one `add_captions` with `position_y: -0.7` and `font_size: 10`.
 6. For music, find a track with the `capcut-materials` skill and add an `add_audio` operation with `fade_out_ms: 1500` to the end of `ops.json`.
 7. Follow the `capcut-draft` skill from "Get the starting document". Create the document with `node "${CLAUDE_PLUGIN_ROOT}/scripts/stdraft.mjs" new --width <width> --height <height>`, apply `ops.json`, call `start_stdraft_session`, then save with an empty `base_package_id`.
-8. Give the user the web editor link. Tell them to add transitions there if they want them, export the video from the editor, and that the draft shows as "Untitled" in their CapCut apps.
+8. Give the user the web editor link. Tell them to add transitions there if they want them and export the video from the editor, and give them the draft name and copy notes from the `capcut-draft` skill's "After a successful save" step.
 
 If the save fails with `STDRAFT_INVALID` on the image clips, report the validation details to the user. Don't fall back to other tools.
 
