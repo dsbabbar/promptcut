@@ -259,3 +259,110 @@ test('CapCut curve presets give the clip lengths CapCut shows for a 6-second cli
   }
   assert.throws(() => applyOperations(six(), [{ op: 'speed_ramp', id: 'clip_a', shape: 'hero', peak: 4 }]), /fixed CapCut preset/)
 })
+
+test('overlays (picture-in-picture, logos) go on free layers above the main track', () => {
+  const { draft, changes } = applyOperations(sampleDraft(), [
+    { op: 'add_image', source: 'tos://logo', overlay: true, start_ms: 0, duration_ms: 5000, position_x: 0.7, position_y: -0.8, scale: 0.2, opacity: 0.9 },
+    { op: 'add_video', source: 'vid://facecam', overlay: true, start_ms: 1000, source_end_ms: 2000, scale: 0.35, position_x: -0.6, position_y: 0.6 },
+    { op: 'add_video', source: 'vid://more', source_end_ms: 1000 },
+  ])
+  const logo = draft.segments.find(s => s.attributes?.source === 'tos://logo')
+  assert.deepEqual(logo.layout, { layer: 1, position_x: 0.7, position_y: -0.8, scale_x: 0.2, scale_y: 0.2, alpha: 0.9 })
+  assert.equal(draft.segments.find(s => s.attributes?.source === 'vid://facecam').layout.layer, 2, 'overlapping overlays stack')
+  const more = draft.segments.find(s => s.attributes?.source === 'vid://more')
+  assert.deepEqual([more.layout.layer, more.timeline['start.ms']], [0, 5000], 'main track still appends')
+  assert.match(changes[0], /overlay on layer 1/)
+  assert.deepEqual(validate(draft), [])
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_image', source: 'tos://x', overlay: true, duration_ms: 100 }]), /needs start_ms/)
+  assert.throws(() => applyOperations(draft, [{ op: 'add_image', source: 'tos://y', layer: 1, start_ms: 10, duration_ms: 100 }]), /already has a clip/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_image', source: 'tos://x', overlay: true, start_ms: 0, duration_ms: 100, opacity: 2 }]), /opacity must be/)
+  const clash = applyOperations(sampleDraft(), [{ op: 'add_image', source: 'tos://x', overlay: true, start_ms: 0, duration_ms: 1000 }]).draft
+  clash.segments.push({ ...clash.segments.at(-1), id: 'copy' })
+  assert.match(validate(clash).join('\n'), /overlap on layer 1/)
+})
+
+test('crop, background fill, size, rotation and opacity', () => {
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'update', id: 'clip_a', crop: [0.1, 0, 0.9, 1], background_blur: 0.5 },
+    { op: 'update', id: 'clip_b', background_color: '#112233' },
+    { op: 'place', id: 'clip_b', scale: 0.8, rotation: 5, opacity: 0.5 },
+    { op: 'place', id: 'title', scale_x: 1.2 },
+  ])
+  const a = draft.segments.find(s => s.id === 'clip_a')
+  assert.deepEqual(a.attributes.crop, [0.1, 0, 0.9, 1])
+  assert.equal(a.attributes['background.blur'], 0.5)
+  const b = draft.segments.find(s => s.id === 'clip_b')
+  assert.equal(b.attributes['background.color'], '#112233')
+  assert.deepEqual([b.layout.scale_x, b.layout.scale_y, b.layout.rotation, b.layout.alpha], [0.8, 0.8, 5, 0.5])
+  assert.equal(draft.segments.find(s => s.id === 'title').layout.scale_x, 1.2)
+  assert.equal('crop' in applyOperations(draft, [{ op: 'update', id: 'clip_a', crop: null }]).draft.segments.find(s => s.id === 'clip_a').attributes, false)
+  assert.deepEqual(validate(draft), [])
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', crop: [0.5, 0, 0.4, 1] }]), /right must be past left/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'title', crop: [0, 0, 1, 1] }]), /only on video clips/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', background_color: 'red' }]), /colour like/)
+})
+
+test('text style: outline, shadow, box, alignment and spacing', () => {
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'add_text', content: 'Just listed', start_ms: 0, duration_ms: 2000, alignment: 'left', outline_color: '#ffcc00', outline_width: 0.1, shadow: true, box_color: '#000000', box_opacity: 0.5, underline: true, letter_spacing: 2, rotation: -8 },
+    { op: 'add_captions', cues: [{ start_ms: 0, end_ms: 1000, text: 'Hi' }], style: { outline: false, shadow: false } },
+    { op: 'update', id: 'title', shadow_opacity: 0.8, text_opacity: 0.9 },
+  ])
+  const t = draft.segments.find(s => s.attributes?.content === 'Just listed')
+  assert.equal(t.attributes.alignment, 0)
+  assert.deepEqual([t.attributes.border_color, t.attributes.border_width], ['#FFCC00', 0.1])
+  assert.deepEqual([t.attributes.shadow_color, t.attributes.shadow_alpha, t.attributes.shadow_distance, t.attributes.shadow_smoothing], ['#000000', 0.4, 2, 0.3])
+  assert.deepEqual([t.attributes.background_color, t.attributes.background_alpha], ['#000000', 0.5])
+  assert.equal(t.attributes.underline, true)
+  assert.equal(t.layout.rotation, -8)
+  const c = draft.segments.find(s => s.id.startsWith('caption_'))
+  assert.deepEqual([c.attributes.border_width, c.attributes.shadow_alpha], [0, 0])
+  const title = draft.segments.find(s => s.id === 'title')
+  assert.deepEqual([title.attributes.shadow_alpha, title.attributes.text_alpha], [0.8, 0.9])
+  assert.deepEqual(validate(draft), [])
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'clip_a', shadow: true }]), /only on TEXT/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'update', id: 'title', alignment: 'middle' }]), /alignment must be/)
+})
+
+test('animate and zoom write layout keyframes timed from the segment start', () => {
+  const { draft, changes } = applyOperations(sampleDraft(), [
+    { op: 'zoom', id: 'clip_a', to: 1.2, pan: 'left', pan_amount: 0.05 },
+    { op: 'animate', id: 'title', property: 'opacity', keyframes: [{ time_ms: 0, value: 0 }, { time_ms: 500, value: 1 }] },
+  ])
+  const a = draft.segments.find(s => s.id === 'clip_a')
+  assert.deepEqual(a.layout['scale_x.keyframes'], [{ 'time.ms': 0, value: 1 }, { 'time.ms': 3000, value: 1.2 }])
+  assert.deepEqual(a.layout['scale_y.keyframes'], a.layout['scale_x.keyframes'])
+  assert.deepEqual(a.layout['position_x.keyframes'], [{ 'time.ms': 0, value: 0 }, { 'time.ms': 3000, value: -0.05 }])
+  assert.match(changes[0], /zooms from 1x to 1.2x over 3.0s and drifts left/)
+  assert.deepEqual(draft.segments.find(s => s.id === 'title').layout['alpha.keyframes'], [{ 'time.ms': 0, value: 0 }, { 'time.ms': 500, value: 1 }])
+  assert.deepEqual(validate(draft), [])
+  const cleared = applyOperations(draft, [{ op: 'animate', id: 'title', property: 'opacity', keyframes: [] }]).draft
+  assert.equal('alpha.keyframes' in cleared.segments.find(s => s.id === 'title').layout, false)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'animate', id: 'title', property: 'opacity', keyframes: [{ time_ms: 0, value: 0 }, { time_ms: 9000, value: 1 }] }]), /time_ms must be/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'animate', id: 'music', property: 'scale', keyframes: [{ time_ms: 0, value: 1 }, { time_ms: 1, value: 2 }] }]), /only video clips, images and text/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'zoom', id: 'title' }]), /zoom works on video/)
+})
+
+test('music: start offset, sound effects and lowering it under speech', () => {
+  const { draft, changes } = applyOperations(sampleDraft(), [
+    { op: 'add_audio', source: 'sid://song', source_start_ms: 30000, duration_ms: 4000, volume: 0.8 },
+    { op: 'add_audio', source: 'sid://whoosh', kind: 'sound', start_ms: 3200, duration_ms: 600 },
+  ])
+  const song = draft.segments.find(s => s.attributes?.source === 'sid://song')
+  assert.deepEqual([song.attributes['start.ms'], song.attributes['end.ms']], [30000, 34000])
+  const whoosh = draft.segments.find(s => s.attributes?.source === 'sid://whoosh')
+  assert.deepEqual([whoosh.attributes.meta_type, whoosh.attributes.auto_loop], ['SOUND', false])
+  assert.match(changes[1], /at 3200 ms/)
+  // The song plays project 0-4000 from source 30000; duck project 1000-2000 to 25%.
+  const ducked = applyOperations(draft, [{ op: 'duck', id: song.id, ranges: [{ start_ms: 1000, end_ms: 2000 }], fade_ms: 200 }]).draft
+  assert.deepEqual(ducked.segments.find(s => s.id === song.id).attributes['volume.keyframes'], [
+    { 'time.ms': 30800, value: 0.8 }, { 'time.ms': 31000, value: 0.2 }, { 'time.ms': 32000, value: 0.2 }, { 'time.ms': 32200, value: 0.8 },
+  ])
+  // Overlapping ranges merge; ranges are clipped to the segment.
+  const merged = applyOperations(sampleDraft(), [{ op: 'duck', id: 'music', ranges: [{ start_ms: 1000, end_ms: 2000 }, { start_ms: 2100, end_ms: 9000 }], to: 0.5 }]).draft
+  assert.deepEqual(merged.segments.find(s => s.id === 'music').attributes['volume.keyframes'].map(f => f['time.ms']), [700, 1000, 2000, 2100, 5000])
+  assert.deepEqual(validate(ducked), [])
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'duck', id: 'title', ranges: [{ start_ms: 0, end_ms: 1 }] }]), /no sound/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'duck', id: 'music', ranges: [{ start_ms: 9000, end_ms: 9500 }] }]), /None of the ranges/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_audio', source: 'sid://x', kind: 'voice' }]), /kind must be/)
+})

@@ -100,6 +100,136 @@ export function draftDuration(draft) {
   return Math.max(0, ...draft.segments.filter(s => s.timeline).map(s => s.timeline['start.ms'] + s.timeline['duration.ms']))
 }
 
+// ------------------------------------------------------------------ look and layout
+
+function requireColor(value, name) {
+  if (typeof value !== 'string' || !/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(value)) throw new Error(`${name} must be a colour like #FFFFFF or #FFFFFFCC`)
+  return value.toUpperCase()
+}
+
+function requireNumber(value, name, min, max) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw new Error(`${name} must be a number from ${min} to ${max}`)
+  return value
+}
+
+const ALIGN = { left: 0, center: 1, right: 2 }
+
+// Text style fields shared by add_text, add_captions (as style) and update. Friendly names map to CapCut's
+// TEXT attributes; outline and shadow defaults are the values CapCut uses on its own captions.
+function applyTextStyle(a, op, changed = []) {
+  if (op.alignment !== undefined) {
+    if (!(op.alignment in ALIGN)) throw new Error('alignment must be left, center or right')
+    a.alignment = ALIGN[op.alignment]; changed.push('alignment')
+  }
+  if (op.outline === false) { a.border_width = 0; changed.push('outline') }
+  if (op.outline === true || op.outline_color !== undefined || op.outline_width !== undefined) {
+    a.border_color = requireColor(op.outline_color ?? a.border_color ?? '#000000', 'outline_color')
+    a.border_width = requireNumber(op.outline_width ?? (a.border_width || 0.06), 'outline_width', 0, 1)
+    changed.push('outline')
+  }
+  if (op.shadow === false) { a.shadow_alpha = 0; changed.push('shadow') }
+  if (op.shadow === true || ['shadow_color', 'shadow_opacity', 'shadow_distance', 'shadow_angle', 'shadow_blur'].some(k => op[k] !== undefined)) {
+    a.shadow_color = requireColor(op.shadow_color ?? a.shadow_color ?? '#000000', 'shadow_color')
+    a.shadow_alpha = requireNumber(op.shadow_opacity ?? (a.shadow_alpha || 0.4), 'shadow_opacity', 0, 1)
+    a.shadow_distance = requireNumber(op.shadow_distance ?? a.shadow_distance ?? 2, 'shadow_distance', 0, 100)
+    a.shadow_smoothing = requireNumber(op.shadow_blur ?? a.shadow_smoothing ?? 0.3, 'shadow_blur', 0, 1)
+    if (op.shadow_angle !== undefined) a.shadow_angle = requireNumber(op.shadow_angle, 'shadow_angle', -360, 360)
+    changed.push('shadow')
+  }
+  if (op.box === false) { a.background_alpha = 0; changed.push('box') }
+  if (op.box_color !== undefined || op.box_opacity !== undefined) {
+    a.background_color = requireColor(op.box_color ?? a.background_color ?? '#000000', 'box_color')
+    a.background_alpha = requireNumber(op.box_opacity ?? (a.background_alpha || 0.6), 'box_opacity', 0, 1)
+    changed.push('box')
+  }
+  if (op.text_opacity !== undefined) { a.text_alpha = requireNumber(op.text_opacity, 'text_opacity', 0, 1); changed.push('text_opacity') }
+  if (op.underline !== undefined) { a.underline = Boolean(op.underline); changed.push('underline') }
+  for (const key of ['letter_spacing', 'line_spacing', 'bold_width', 'italic_degree']) {
+    if (op[key] !== undefined) { a[key] = requireNumber(op[key], key, -100, 100); changed.push(key) }
+  }
+  if (op.line_max_width !== undefined) { a.line_max_width = requireNumber(op.line_max_width, 'line_max_width', 0.05, 1); changed.push('line_max_width') }
+  return changed
+}
+
+// Size, rotation and opacity on a segment's layout. scale sets both scale_x and scale_y.
+function applyTransform(layout, op, changed = []) {
+  if (op.scale !== undefined) { layout.scale_x = layout.scale_y = requireNumber(op.scale, 'scale', 0.01, 10); changed.push('scale') }
+  for (const key of ['scale_x', 'scale_y']) if (op[key] !== undefined) { layout[key] = requireNumber(op[key], key, 0.01, 10); changed.push(key) }
+  if (op.rotation !== undefined) { layout.rotation = requireNumber(op.rotation, 'rotation', -360, 360); changed.push('rotation') }
+  if (op.opacity !== undefined) { layout.alpha = requireNumber(op.opacity, 'opacity', 0, 1); changed.push('opacity') }
+  return changed
+}
+
+// Crop and background fill on a video clip or image. crop is [left, top, right, bottom] from 0 to 1.
+function applyClipLook(s, op, changed = []) {
+  const a = s.attributes
+  if (op.crop !== undefined) {
+    if (s.type !== 'VIDEO') throw new Error('crop works only on video clips and images')
+    if (op.crop === null) { delete a.crop; changed.push('crop removed') } else {
+      if (!Array.isArray(op.crop) || op.crop.length !== 4 || op.crop.some(n => typeof n !== 'number' || n < 0 || n > 1)) throw new Error('crop must be [left, top, right, bottom], each from 0 to 1')
+      if (op.crop[2] <= op.crop[0] || op.crop[3] <= op.crop[1]) throw new Error('crop right must be past left, and bottom past top')
+      a.crop = op.crop; changed.push('crop')
+    }
+  }
+  if (op.background_blur !== undefined || op.background_color !== undefined) {
+    if (s.type !== 'VIDEO') throw new Error('background fill works only on video clips and images')
+    if (op.background_blur !== undefined) { a['background.blur'] = requireNumber(op.background_blur, 'background_blur', 0, 1); delete a['background.color']; changed.push('background blur') }
+    if (op.background_color !== undefined) { a['background.color'] = requireColor(op.background_color, 'background_color'); delete a['background.blur']; changed.push('background colour') }
+  }
+  return changed
+}
+
+// The lowest layer from 1 up where no other video clip or image overlaps the given time range.
+function overlayLayer(draft, timeline) {
+  const visuals = draft.segments.filter(s => s.type === 'VIDEO' && s.timeline)
+  for (let layer = 1; ; layer++) {
+    if (!visuals.some(s => s.layout?.layer === layer && overlaps(s.timeline, timeline))) return layer
+  }
+}
+
+// Where a new video clip or image goes: the main track (appended unless start_ms is given) or, with overlay
+// or layer, on top of it. Returns {timeline start, layout}.
+function visualPlacement(draft, op, duration) {
+  const overlay = op.overlay === true || (op.layer !== undefined && op.layer !== 0)
+  if (!overlay) {
+    const layout = { layer: 0 }
+    applyTransform(layout, op)
+    return { start: requireMs(op.start_ms ?? mainTrackEnd(draft), 'start_ms'), layout }
+  }
+  if (op.start_ms === undefined) throw new Error('An overlay needs start_ms')
+  const start = requireMs(op.start_ms, 'start_ms')
+  const timeline = { 'start.ms': start, 'duration.ms': duration }
+  if (op.layer !== undefined && !(Number.isInteger(op.layer) && op.layer >= 1)) throw new Error('layer must be a whole number of at least 1')
+  const layer = op.layer ?? overlayLayer(draft, timeline)
+  if (draft.segments.some(s => s.type === 'VIDEO' && s.layout?.layer === layer && s.timeline && overlaps(s.timeline, timeline))) throw new Error(`Layer ${layer} already has a clip at that time`)
+  const layout = { layer }
+  for (const key of ['position_x', 'position_y']) {
+    if (op[key] !== undefined) layout[key] = requireNumber(op[key], key, -2, 2)
+  }
+  applyTransform(layout, op)
+  return { start, layout }
+}
+
+// ------------------------------------------------------------------ keyframes
+
+const LAYOUT_KEYS = { position_x: 'position_x', position_y: 'position_y', scale: null, scale_x: 'scale_x', scale_y: 'scale_y', rotation: 'rotation', opacity: 'alpha' }
+
+function requireKeyframes(points, duration) {
+  if (!Array.isArray(points) || points.length < 2) throw new Error('keyframes needs at least two {time_ms, value} points')
+  const frames = points.map((p, i) => {
+    if (!p || !Number.isInteger(p.time_ms) || p.time_ms < 0 || p.time_ms > duration) throw new Error(`keyframe ${i + 1}: time_ms must be a whole number from 0 to the segment's length (${duration})`)
+    if (typeof p.value !== 'number' || !Number.isFinite(p.value)) throw new Error(`keyframe ${i + 1}: value must be a number`)
+    return { 'time.ms': p.time_ms, value: p.value }
+  })
+  for (let i = 1; i < frames.length; i++) if (frames[i]['time.ms'] <= frames[i - 1]['time.ms']) throw new Error('keyframe times must increase')
+  return frames
+}
+
+// Project time to source time for volume keyframes, which CapCut times from the start of the source.
+function sourceTime(s, projectMs) {
+  return Math.round((projectMs - s.timeline['start.ms']) * speedOf(s) + (s.attributes?.['start.ms'] ?? 0))
+}
+
 // ------------------------------------------------------------------ speed
 
 export const MIN_SPEED = 0.1
@@ -219,6 +349,13 @@ export function validate(draft) {
     if ((s.type === 'VIDEO' || s.type === 'AUDIO') && typeof a.source !== 'string') errors.push(`${label} needs a source`)
     if ('start.ms' in a && 'end.ms' in a && a['end.ms'] <= a['start.ms']) errors.push(`${label} has a source range that ends before it starts`)
     if (s.type === 'VIDEO' && a.meta_type === 'photo' && ('speed' in a || 'curve_speed' in a)) errors.push(`${label} is a still image, which cannot have speed or curve_speed`)
+    for (const holder of [a, s.layout ?? {}]) {
+      for (const [key, frames] of Object.entries(holder)) {
+        if (!key.endsWith('.keyframes')) continue
+        if (!Array.isArray(frames) || frames.some(f => !f || !Number.isInteger(f['time.ms']) || f['time.ms'] < 0 || !('value' in f))) errors.push(`${label} has invalid ${key}`)
+      }
+    }
+    if (s.layout && 'alpha' in s.layout && !(s.layout.alpha >= 0 && s.layout.alpha <= 1)) errors.push(`${label} has opacity outside 0 to 1`)
     if ('curve_speed' in a) {
       try { checkCurve(JSON.parse(a.curve_speed)) } catch (e) { errors.push(`${label} has an invalid curve_speed: ${e.message}`) }
     }
@@ -231,13 +368,22 @@ export function validate(draft) {
       errors.push(`Main-track clips ${prev.id} and ${mainTrack[i].id} overlap`)
     }
   }
+  const overlays = draft.segments.filter(s => s.type === 'VIDEO' && s.timeline && Number.isInteger(s.layout?.layer) && s.layout.layer > 0)
+  for (let i = 0; i < overlays.length; i++) {
+    for (let j = i + 1; j < overlays.length; j++) {
+      if (overlays[i].layout.layer === overlays[j].layout.layer && overlaps(overlays[i].timeline, overlays[j].timeline)) {
+        errors.push(`Overlays ${overlays[i].id} and ${overlays[j].id} overlap on layer ${overlays[i].layout.layer}`)
+      }
+    }
+  }
   return errors
 }
 
 // ------------------------------------------------------------------ operations
 
 const OPERATIONS = {
-  // {op, content, start_ms, duration_ms, position_y?, position_x?, font_size?, font_color?, font?}
+  // {op, content, start_ms, duration_ms, position_y?, position_x?, font_size?, font_color?, font?, plus text
+  // style fields (alignment, outline, shadow, box, ...) and scale, rotation, opacity}
   add_text(draft, op) {
     if (!(typeof op.content === 'string' && op.content.trim())) throw new Error('content is required')
     const id = uniqueId(draft, 'text')
@@ -245,18 +391,21 @@ const OPERATIONS = {
     if (op.font_size !== undefined) attributes.font_size = op.font_size
     if (op.font_color) attributes.font_color = attributes.text_color = op.font_color
     if (op.font) attributes.font = requireSource(op.font, ['vimo'])
+    applyTextStyle(attributes, op)
+    const layout = { layer: nextLayer(draft, 'TEXT', TEXT_LAYER_BASE), position_x: op.position_x ?? 0, position_y: op.position_y ?? 0.4 }
+    applyTransform(layout, op)
     draft.segments.push({
       id,
       type: 'TEXT',
       parent_id: root(draft).id,
       timeline: { 'start.ms': requireMs(op.start_ms, 'start_ms'), 'duration.ms': requireMs(op.duration_ms, 'duration_ms', { min: 1 }) },
-      layout: { layer: nextLayer(draft, 'TEXT', TEXT_LAYER_BASE), position_x: op.position_x ?? 0, position_y: op.position_y ?? 0.4 },
+      layout,
       attributes,
     })
     return `Added text "${op.content}" (${id}) at ${op.start_ms} ms for ${op.duration_ms} ms`
   },
 
-  // {op, cues: [{start_ms, end_ms, text}], position_y?, font_size?, font?, layer?}
+  // {op, cues: [{start_ms, end_ms, text}], position_y?, font_size?, font?, layer?, style?: {text style fields}}
   add_captions(draft, op) {
     if (!Array.isArray(op.cues) || op.cues.length === 0) throw new Error('cues must be a non-empty array')
     const timelines = op.cues.map((cue, i) => {
@@ -274,6 +423,7 @@ const OPERATIONS = {
       const attributes = { ...TEXT_STYLE, content: cue.text.trim() }
       if (op.font_size !== undefined) attributes.font_size = op.font_size
       if (op.font) attributes.font = requireSource(op.font, ['vimo'])
+      if (op.style) applyTextStyle(attributes, op.style)
       draft.segments.push({
         id,
         type: 'TEXT',
@@ -287,13 +437,19 @@ const OPERATIONS = {
     return `Added ${added.length} captions on layer ${layer}`
   },
 
-  // {op, source: "sid://..." (searched music) | "vid://..." | "vimo://..." | "tos://...", start_ms?, duration_ms?, volume?, fade_in_ms?, fade_out_ms?, loop?}
+  // {op, source: "sid://..." (searched music) | "vid://..." | "vimo://..." | "tos://...", start_ms?, duration_ms?,
+  // source_start_ms? (where in the track to start, e.g. the chorus), kind?: "music" | "sound", volume?,
+  // fade_in_ms?, fade_out_ms?, loop?}
   add_audio(draft, op) {
     const source = requireSource(op.source, ['sid', 'vid', 'vimo', 'tos'])
     const start = requireMs(op.start_ms ?? 0, 'start_ms')
     const duration = requireMs(op.duration_ms ?? Math.max(1, draftDuration(draft) - start), 'duration_ms', { min: 1 })
+    const from = requireMs(op.source_start_ms ?? 0, 'source_start_ms')
+    if (op.kind !== undefined && !['music', 'sound'].includes(op.kind)) throw new Error('kind must be music or sound')
     const id = uniqueId(draft, 'audio')
-    const attributes = { source, volume: op.volume ?? 1, auto_loop: op.loop ?? true, 'end.ms': duration }
+    const attributes = { source, volume: op.volume ?? 1, auto_loop: op.loop ?? (op.kind !== 'sound'), 'end.ms': from + duration }
+    if (from) attributes['start.ms'] = from
+    if (op.kind) attributes.meta_type = op.kind === 'sound' ? 'SOUND' : 'MUSIC'
     if (op.fade_in_ms) attributes['fade_in.ms'] = requireMs(op.fade_in_ms, 'fade_in_ms')
     if (op.fade_out_ms) attributes['fade_out.ms'] = requireMs(op.fade_out_ms, 'fade_out_ms')
     draft.segments.push({
@@ -307,45 +463,55 @@ const OPERATIONS = {
     return `Added audio ${source} (${id}) at ${start} ms for ${duration} ms`
   },
 
-  // {op, source: "vid://...", source_start_ms?, source_end_ms, start_ms?, volume?}
-  // Appends to the end of the main track unless start_ms is given.
+  // {op, source: "vid://...", source_start_ms?, source_end_ms, start_ms?, volume?, overlay?, layer?, position_x?,
+  // position_y?, scale?, rotation?, opacity?, crop?, background_blur?, background_color?}
+  // Appends to the end of the main track unless start_ms is given. overlay: true (with start_ms) puts it on top
+  // of the main track instead, on the lowest free layer, as picture-in-picture.
   add_video(draft, op) {
     const source = requireSource(op.source, ['vid'])
     const from = requireMs(op.source_start_ms ?? 0, 'source_start_ms')
     const to = requireMs(op.source_end_ms, 'source_end_ms', { min: from + 1 })
-    const mainEnd = mainTrackEnd(draft)
+    const { start, layout } = visualPlacement(draft, op, to - from)
     const id = uniqueId(draft, 'video')
-    draft.segments.push({
+    const s = {
       id,
       type: 'VIDEO',
       parent_id: root(draft).id,
-      timeline: { 'start.ms': requireMs(op.start_ms ?? mainEnd, 'start_ms'), 'duration.ms': to - from },
-      layout: { layer: 0 },
+      timeline: { 'start.ms': start, 'duration.ms': to - from },
+      layout,
       attributes: { source, meta_type: 'video', 'start.ms': from, 'end.ms': to, volume: op.volume ?? 1 },
-    })
-    return `Added video ${source} (${id}) for ${to - from} ms`
+    }
+    applyClipLook(s, op)
+    draft.segments.push(s)
+    return `Added video ${source} (${id}) for ${to - from} ms${layout.layer ? ` as an overlay on layer ${layout.layer}` : ''}`
   },
 
-  // {op, source: "tos://..." (an uploaded image's uri; the tos:// prefix is added if missing), duration_ms, start_ms?}
-  // A still image on the main track, shown for duration_ms. Appends to the end of the main track unless start_ms is given.
+  // {op, source: "tos://..." (an uploaded image's uri; the tos:// prefix is added if missing), duration_ms, start_ms?,
+  // overlay?, layer?, position_x?, position_y?, scale?, rotation?, opacity?, crop?, background_blur?, background_color?}
+  // A still image on the main track, shown for duration_ms. Appends to the end of the main track unless start_ms is
+  // given. overlay: true (with start_ms) puts it on top instead, for a logo or a picture-in-picture photo.
   add_image(draft, op) {
     const raw = typeof op.source === 'string' ? op.source.trim() : ''
     if (!raw) throw new Error('source is required')
     const source = requireSource(raw.includes('://') ? raw : `tos://${raw.replace(/^\/+/, '')}`, ['tos', 'vid', 'asset'])
     const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
+    const { start, layout } = visualPlacement(draft, op, duration)
     const id = uniqueId(draft, 'image')
-    draft.segments.push({
+    const s = {
       id,
       type: 'VIDEO',
       parent_id: root(draft).id,
-      timeline: { 'start.ms': requireMs(op.start_ms ?? mainTrackEnd(draft), 'start_ms'), 'duration.ms': duration },
-      layout: { layer: 0 },
+      timeline: { 'start.ms': start, 'duration.ms': duration },
+      layout,
       attributes: { source, meta_type: 'photo', 'start.ms': 0 },
-    })
-    return `Added image ${source} (${id}) for ${duration} ms`
+    }
+    applyClipLook(s, op)
+    draft.segments.push(s)
+    return `Added image ${source} (${id}) for ${duration} ms${layout.layer ? ` as an overlay on layer ${layout.layer}` : ''}`
   },
 
-  // {op, id, content?, volume?, font_size?, font_color?, font?, fade_in_ms?, fade_out_ms?}
+  // {op, id, content?, volume?, font_size?, font_color?, font?, fade_in_ms?, fade_out_ms?, text style fields (TEXT),
+  // crop?, background_blur?, background_color? (video clips and images)}
   update(draft, op) {
     const s = find(draft, op.id)
     const a = s.attributes ?? (s.attributes = {})
@@ -365,11 +531,17 @@ const OPERATIONS = {
     if (op.font) { a.font = requireSource(op.font, ['vimo']); changed.push('font') }
     if (op.fade_in_ms !== undefined) { a['fade_in.ms'] = requireMs(op.fade_in_ms, 'fade_in_ms'); changed.push('fade_in') }
     if (op.fade_out_ms !== undefined) { a['fade_out.ms'] = requireMs(op.fade_out_ms, 'fade_out_ms'); changed.push('fade_out') }
+    const styled = applyTextStyle({}, op)
+    if (styled.length) {
+      if (s.type !== 'TEXT') throw new Error('Text style fields work only on TEXT segments')
+      applyTextStyle(a, op, changed)
+    }
+    applyClipLook(s, op, changed)
     if (changed.length === 0) throw new Error('update needs at least one field to change')
     return `Updated ${s.id}: ${changed.join(', ')}`
   },
 
-  // {op, id, start_ms?, duration_ms?, position_x?, position_y?, layer?}
+  // {op, id, start_ms?, duration_ms?, position_x?, position_y?, layer?, scale?, scale_x?, scale_y?, rotation?, opacity?}
   place(draft, op) {
     const s = find(draft, op.id)
     const changed = []
@@ -387,6 +559,7 @@ const OPERATIONS = {
       }
     }
     if (op.layer !== undefined) { s.layout.layer = op.layer; changed.push('layer') }
+    if (s.type !== 'AUDIO') applyTransform(s.layout, op, changed)
     if (changed.length === 0) throw new Error('place needs at least one field to change')
     return `Moved ${s.id}: ${changed.join(', ')}`
   },
@@ -410,6 +583,80 @@ const OPERATIONS = {
     }
     const used = [...new Set(placed.map(p => p.layer))].sort((a, b) => a - b)
     return `Put ${captions.length} captions on layer${used.length > 1 ? 's' : ''} ${used.join(', ')}`
+  },
+
+  // {op, id, property: "position_x" | "position_y" | "scale" | "scale_x" | "scale_y" | "rotation" | "opacity",
+  //  keyframes: [{time_ms, value}]}: animates a visual segment over time. time_ms counts from the segment's start
+  // on the timeline. An empty keyframes array removes that animation.
+  animate(draft, op) {
+    const s = find(draft, op.id)
+    if (!['VIDEO', 'TEXT'].includes(s.type)) throw new Error(`${op.id} is ${s.type}; only video clips, images and text can be animated`)
+    if (!Object.hasOwn(LAYOUT_KEYS, op.property)) throw new Error(`property must be one of ${Object.keys(LAYOUT_KEYS).join(', ')}`)
+    const keys = op.property === 'scale' ? ['scale_x', 'scale_y'] : [LAYOUT_KEYS[op.property]]
+    if (Array.isArray(op.keyframes) && op.keyframes.length === 0) {
+      for (const key of keys) delete s.layout[`${key}.keyframes`]
+      return `Removed the ${op.property} animation from ${s.id}`
+    }
+    const frames = requireKeyframes(op.keyframes, s.timeline['duration.ms'])
+    if (op.property === 'opacity' && frames.some(f => f.value < 0 || f.value > 1)) throw new Error('opacity keyframe values must be from 0 to 1')
+    for (const key of keys) s.layout[`${key}.keyframes`] = frames.map(f => ({ ...f }))
+    return `Animated ${s.id} ${op.property} with ${frames.length} keyframes`
+  },
+
+  // {op, id, from?: 1, to?: 1.15, pan?: "left" | "right" | "up" | "down", pan_amount?: 0.1}
+  // A slow zoom (the Ken Burns effect) over a clip or image's whole length: scale goes from `from` to `to`,
+  // with an optional drift in one direction. Use to < from to zoom out.
+  zoom(draft, op) {
+    const s = find(draft, op.id)
+    if (s.type !== 'VIDEO') throw new Error(`${op.id} is ${s.type}; zoom works on video clips and images`)
+    const from = requireNumber(op.from ?? 1, 'from', 0.1, 5)
+    const to = requireNumber(op.to ?? 1.15, 'to', 0.1, 5)
+    const end = s.timeline['duration.ms']
+    for (const key of ['scale_x', 'scale_y']) s.layout[`${key}.keyframes`] = [{ 'time.ms': 0, value: from }, { 'time.ms': end, value: to }]
+    let pan = ''
+    if (op.pan !== undefined) {
+      const dir = { left: ['position_x', -1], right: ['position_x', 1], up: ['position_y', 1], down: ['position_y', -1] }[op.pan]
+      if (!dir) throw new Error('pan must be left, right, up or down')
+      const amount = requireNumber(op.pan_amount ?? 0.1, 'pan_amount', 0, 1)
+      const base = s.layout[dir[0]] ?? 0
+      s.layout[`${dir[0]}.keyframes`] = [{ 'time.ms': 0, value: base }, { 'time.ms': end, value: base + dir[1] * amount }]
+      pan = ` and drifts ${op.pan}`
+    }
+    return `${s.id} zooms from ${from}x to ${to}x over ${(end / 1000).toFixed(1)}s${pan}`
+  },
+
+  // {op, id, ranges: [{start_ms, end_ms}], to?: 0.25, fade_ms?: 300}: lowers a music track or clip's volume to
+  // `to` (a fraction of its normal volume) during each project-time range, for speech or a key moment, with
+  // short fades in and out. Replaces any earlier volume keyframes on that segment.
+  duck(draft, op) {
+    const s = find(draft, op.id)
+    if (!['AUDIO', 'VIDEO'].includes(s.type) || s.attributes?.meta_type === 'photo') throw new Error(`${op.id} has no sound to lower`)
+    if (!Array.isArray(op.ranges) || op.ranges.length === 0) throw new Error('ranges must be a non-empty array of {start_ms, end_ms}')
+    const level = s.attributes.volume ?? 1
+    const low = level * requireNumber(op.to ?? 0.25, 'to', 0, 1)
+    const fade = requireMs(op.fade_ms ?? 300, 'fade_ms')
+    const segStart = s.timeline['start.ms'], segEnd = segStart + s.timeline['duration.ms']
+    const ranges = op.ranges.map((r, i) => {
+      const start = requireMs(r.start_ms, `range ${i + 1} start_ms`)
+      const end = requireMs(r.end_ms, `range ${i + 1} end_ms`, { min: start + 1 })
+      return [Math.max(start, segStart), Math.min(end, segEnd)]
+    }).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])
+    if (ranges.length === 0) throw new Error(`None of the ranges fall within ${s.id} on the timeline`)
+    const points = []
+    for (const [start, end] of ranges) {
+      const down = Math.max(segStart, start - fade), up = Math.min(segEnd, end + fade)
+      if (points.length && points.at(-1)[0] >= down) points.pop() // merge with the previous range
+      else points.push([down, level])
+      points.push([start, low], [end, low], [up, level])
+    }
+    const frames = []
+    for (const [t, v] of points) {
+      const time = sourceTime(s, t)
+      if (frames.length && time <= frames.at(-1)['time.ms']) continue
+      frames.push({ 'time.ms': time, value: v })
+    }
+    s.attributes['volume.keyframes'] = frames
+    return `${s.id} drops to ${Math.round((low / (level || 1)) * 100)}% of its volume during ${ranges.length} range${ranges.length > 1 ? 's' : ''}`
   },
 
   // {op, id, speed}: plays a video clip at a constant speed (2 = twice as fast, 0.5 = half speed, 1 = normal).
