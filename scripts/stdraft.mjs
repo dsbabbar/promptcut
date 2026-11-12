@@ -45,15 +45,23 @@ const EFFECT_TYPES = new Set(['VIDEO_EFFECT', 'COLOR_FILTER'])
 // copy as the truth, so a style change on the text must be written to its copies too, or it is undone on save.
 const PATCH_STYLE_KEYS = ['font', 'font_size', 'font_color', 'bold', 'italic', 'underline', 'shadow_color', 'shadow_alpha',
   'shadow_angle', 'shadow_smoothing', 'shadow_distance', 'border_color', 'border_width']
+// Keys written to style copies: CapCut's own copy keys plus the text effect, which a real draft dropped when only
+// the text carried it.
+const COPY_KEYS = [...PATCH_STYLE_KEYS, 'flower']
+// Keys a real draft lost from style copies over repeated saves (outlines thinned, text effects vanished). When a
+// copy is missing one that its text has, promptcut fills it back in. Values the copy does have are left alone.
+const REPAIR_KEYS = ['flower', 'border_color', 'border_width', 'shadow_color', 'shadow_alpha', 'shadow_angle', 'shadow_smoothing', 'shadow_distance']
 // DRAFT ratio_type values CapCut accepts, with the canvas size promptcut uses for each.
 const RATIOS = {
   '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080], '4:3': [1440, 1080], '3:4': [1080, 1440],
   '2:1': [2160, 1080], '2.35:1': [2538, 1080], '1.85:1': [1998, 1080], '1.125:2.436': [1080, 2338],
 }
 const RATIO_TYPES = new Set([...Object.keys(RATIOS), 'custom', 'original'])
-// Blend modes as named in CapCut's editor. CapCut's draft format doesn't document the values; these are untested.
-const BLEND_MODES = ['normal', 'darken', 'screen', 'overlay', 'multiply', 'lighten', 'hard_light', 'soft_light',
-  'linear_burn', 'color_burn', 'color_dodge']
+// Blend modes are CapCut library resources. In a real draft, CapCut stored Screen as this resource and the blend
+// strength as the clip's opacity (blend_intensity 0, layout.alpha 0.7). Other modes are only known by reusing one
+// already in the draft (vimo://<id>). CapCut's web editor offers Normal, Overlay, Screen, Darken and Brighten.
+const BLEND_MODES = { screen: 'vimo://6758325170760323597' }
+const BLEND_NAMES = Object.fromEntries(Object.entries(BLEND_MODES).map(([name, uri]) => [uri, name]))
 
 // ------------------------------------------------------------------ helpers
 
@@ -100,6 +108,34 @@ function freeVisualLayer(draft, timelines, from, skip = new Set()) {
 // The layer just above every visual segment that overlaps the time range, for effects and filters.
 function layerAbove(draft, timeline) {
   return Math.max(0, ...visuals(draft).filter(s => overlaps(s.timeline, timeline)).map(s => s.layout.layer + 1))
+}
+
+function portrait(draft) {
+  const a = root(draft).attributes ?? {}
+  return Number(a.height) > Number(a.width)
+}
+
+// On a vertical canvas, Instagram Reels and TikTok cover roughly the bottom fifth (caption and audio bar), the top
+// tenth and the right edge (buttons). Text centred outside this box may be hidden when posted.
+export const SAFE_ZONE = { bottom: -0.55, top: 0.8, right: 0.7, left: -0.85 }
+
+export function safeZoneProblems(draft) {
+  if (!portrait(draft)) return []
+  return visuals(draft).filter(s => ['TEXT', 'SUBTITLE_TEMPLATE', 'TEXT_TEMPLATE'].includes(s.type)).filter(s => {
+    const x = s.layout.position_x ?? 0, y = s.layout.position_y ?? 0
+    return y < SAFE_ZONE.bottom || y > SAFE_ZONE.top || x > SAFE_ZONE.right || x < SAFE_ZONE.left
+  }).map(s => s.id)
+}
+
+// Caption templates and text templates don't wrap, so a long line can run off a vertical frame. A rough check:
+// more than about 28 characters at full size on a vertical canvas (or 45 on a wide one).
+export function overflowProblems(draft) {
+  const limit = portrait(draft) ? 28 : 45
+  return visuals(draft).filter(s => ['SUBTITLE_TEMPLATE', 'TEXT_TEMPLATE'].includes(s.type)).filter(s => {
+    const a = s.attributes ?? {}
+    const longest = Math.max(0, ...(s.type === 'TEXT_TEMPLATE' ? a.contents ?? [] : String(a.content ?? '').split('\n')).map(t => [...String(t)].length))
+    return longest * (s.layout.scale_x ?? 1) > limit
+  }).map(s => s.id)
 }
 
 function children(draft, id) {
@@ -243,7 +279,7 @@ function timelineKey(s) {
 function syncStyleCopies(draft, s, before) {
   const a = s.attributes
   const changed = {}
-  for (const key of PATCH_STYLE_KEYS) {
+  for (const key of COPY_KEYS) {
     if (JSON.stringify(a[key]) !== JSON.stringify(before[key])) changed[key] = a[key]
   }
   if (a.text_color !== before.text_color && a.text_color !== undefined) changed.font_color = a.text_color
@@ -257,6 +293,22 @@ function syncStyleCopies(draft, s, before) {
     }
   }
   return copies.length
+}
+
+// Before every save: fill style keys back into copies that lost them. Returns how many copies were repaired.
+function repairStyleCopies(draft) {
+  let repaired = 0
+  for (const t of draft.segments.filter(x => x.type === 'TEXT' && x.attributes)) {
+    for (const c of children(draft, t.id).filter(x => x.type === 'PATCH')) {
+      c.attributes ??= {}
+      let fixed = false
+      for (const key of REPAIR_KEYS) {
+        if (t.attributes[key] !== undefined && c.attributes[key] === undefined) { c.attributes[key] = t.attributes[key]; fixed = true }
+      }
+      if (fixed) repaired++
+    }
+  }
+  return repaired
 }
 
 // After a text's content changes, clip its style copies' letter ranges to the new length, dropping copies left
@@ -283,7 +335,11 @@ function applyTransform(layout, op, changed = []) {
 }
 
 // Crop and background fill on a video clip or image. crop is [left, top, right, bottom] from 0 to 1.
-function applyClipLook(s, op, changed = []) {
+function hasCutout(draft, s) {
+  return s.attributes?.matting === true || children(draft, s.id).some(c => c.type === 'AI_MATTING')
+}
+
+function applyClipLook(draft, s, op, changed = []) {
   const a = s.attributes
   if (op.crop !== undefined) {
     if (s.type !== 'VIDEO') throw new Error('crop works only on video clips and images')
@@ -300,20 +356,28 @@ function applyClipLook(s, op, changed = []) {
   }
   if (op.blend_mode !== undefined || op.blend_intensity !== undefined) {
     if (s.type !== 'VIDEO') throw new Error('blend works only on video clips and images')
-    if (op.blend_mode === null || op.blend_mode === 'normal') { delete a.blend_mode; delete a.blend_intensity; changed.push('blend removed') } else {
+    if (op.blend_mode === null || op.blend_mode === 'normal') {
+      delete a.blend_mode; delete a.blend_intensity; changed.push('blend removed')
+    } else {
       if (op.blend_mode !== undefined) {
-        if (!BLEND_MODES.includes(op.blend_mode)) throw new Error(`blend_mode must be one of ${BLEND_MODES.join(', ')}`)
-        a.blend_mode = op.blend_mode
+        if (Object.hasOwn(BLEND_MODES, op.blend_mode)) a.blend_mode = BLEND_MODES[op.blend_mode]
+        else if (typeof op.blend_mode === 'string' && /^vimo:\/\/\d+$/.test(op.blend_mode)) a.blend_mode = op.blend_mode
+        else throw new Error(`blend_mode must be ${Object.keys(BLEND_MODES).join(', ')}, normal, or a blend mode's vimo:// source already in the draft (other modes: apply one once in the CapCut editor, then reuse it)`)
       }
       if (!a.blend_mode) throw new Error('blend_intensity needs a blend_mode')
-      a.blend_intensity = requireNumber(op.blend_intensity ?? a.blend_intensity ?? 1, 'blend_intensity', 0, 1)
-      changed.push('blend')
+      // CapCut keeps the blend strength as the clip's opacity.
+      if (op.blend_intensity !== undefined) s.layout.alpha = requireNumber(op.blend_intensity, 'blend_intensity', 0, 1)
+      delete a.blend_intensity
+      changed.push(`blend ${BLEND_NAMES[a.blend_mode] ?? a.blend_mode}${op.blend_intensity !== undefined ? ` at ${Math.round(op.blend_intensity * 100)}%` : ''}`)
     }
   }
   if (op.cutout !== undefined) {
     if (s.type !== 'VIDEO') throw new Error('cutout works only on video clips and images')
-    if (op.cutout) a.matting = true
-    else delete a.matting
+    // CapCut turns matting: true into an AI_MATTING segment under the clip on read-back.
+    if (op.cutout) { if (!hasCutout(draft, s)) a.matting = true } else {
+      delete a.matting
+      for (const c of children(draft, s.id).filter(x => x.type === 'AI_MATTING')) draft.segments.splice(draft.segments.indexOf(c), 1)
+    }
     changed.push(op.cutout ? 'background removed (cutout)' : 'cutout removed')
   }
   return changed
@@ -489,19 +553,36 @@ function retime(draft, s) {
   const delta = duration - s.timeline['duration.ms']
   s.timeline['duration.ms'] = duration
   delete s.timeline['end.ms'] // CapCut's read-back adds end.ms; duration.ms wins, so drop the stale value
-  let moved = 0
-  if (delta !== 0 && s.layout?.layer === 0) {
-    for (const other of draft.segments) {
-      if (other !== s && other.type === 'VIDEO' && other.layout?.layer === 0 && other.timeline && other.timeline['start.ms'] >= oldEnd) {
-        other.timeline['start.ms'] += delta
-        delete other.timeline['end.ms']
-        moved++
-      }
+  const change = delta === 0 ? 'length unchanged' : `${delta < 0 ? 'shorter' : 'longer'} by ${(Math.abs(delta) / 1000).toFixed(1)}s`
+  const note = s.layout?.layer === 0 ? ripple(draft, s, oldEnd, delta) : ''
+  return `now ${(duration / 1000).toFixed(1)}s (${change})${note}`
+}
+
+// CapCut keeps the main track gap-free: when a main-track clip gets shorter, longer or is removed, the clips after it
+// close up. promptcut does the same, and moves everything else that starts at or after the old end (text, captions,
+// audio, effects, overlays) with them, so they stay over the same footage. Returns a note for the change message.
+function ripple(draft, s, oldEnd, delta) {
+  if (delta === 0) return ''
+  let clips = 0, others = 0
+  const spanning = []
+  for (const o of draft.segments) {
+    if (o === s || !o.timeline || o.parent_id !== root(draft).id) continue
+    const t = o.timeline
+    if (t['start.ms'] >= oldEnd) {
+      t['start.ms'] = Math.max(0, t['start.ms'] + delta)
+      delete t['end.ms']
+      if (o.type === 'VIDEO' && o.layout?.layer === 0) clips++
+      else others++
+    } else if (o.type !== 'AUDIO' && !(o.type === 'VIDEO' && o.layout?.layer === 0) && t['start.ms'] + t['duration.ms'] > oldEnd + Math.min(delta, 0)) {
+      spanning.push(o.id)
     }
   }
-  const change = delta === 0 ? 'length unchanged' : `${delta < 0 ? 'shorter' : 'longer'} by ${(Math.abs(delta) / 1000).toFixed(1)}s`
-  const note = moved ? `; ${moved} later main-track clip${moved > 1 ? 's' : ''} moved to match. Text, captions and audio were not moved` : ''
-  return `now ${(duration / 1000).toFixed(1)}s (${change})${note}`
+  const parts = []
+  if (clips) parts.push(`${clips} later main-track clip${clips > 1 ? 's' : ''}`)
+  if (others) parts.push(`${others} later text, caption, audio or effect segment${others > 1 ? 's' : ''}`)
+  let note = parts.length ? `; ${parts.join(' and ')} moved ${delta < 0 ? 'earlier' : 'later'} by ${(Math.abs(delta) / 1000).toFixed(1)}s to match` : ''
+  if (spanning.length) note += `. These run across the change and were not moved; check them: ${spanning.join(', ')}`
+  return note
 }
 
 // ------------------------------------------------------------------ validation
@@ -652,7 +733,7 @@ const OPERATIONS = {
         type: template ? 'SUBTITLE_TEMPLATE' : 'TEXT',
         parent_id: root(draft).id,
         timeline: { 'start.ms': start, 'duration.ms': end - start },
-        layout: { layer, position_x: 0, position_y: op.position_y ?? -0.6 },
+        layout: { layer, position_x: 0, position_y: op.position_y ?? (portrait(draft) ? -0.45 : -0.6) },
         attributes,
       })
       added.push(id)
@@ -704,7 +785,7 @@ const OPERATIONS = {
       layout,
       attributes: { source, meta_type: 'video', 'start.ms': from, 'end.ms': to, volume: op.volume ?? 1 },
     }
-    applyClipLook(s, op)
+    applyClipLook(draft, s, op)
     draft.segments.push(s)
     return `Added video ${source} (${id}) for ${to - from} ms${layout.layer ? ` as an overlay on layer ${layout.layer}` : ''}`
   },
@@ -728,7 +809,7 @@ const OPERATIONS = {
       layout,
       attributes: { source, meta_type: 'photo', 'start.ms': 0 },
     }
-    applyClipLook(s, op)
+    applyClipLook(draft, s, op)
     draft.segments.push(s)
     return `Added image ${source} (${id}) for ${duration} ms${layout.layer ? ` as an overlay on layer ${layout.layer}` : ''}`
   },
@@ -786,7 +867,7 @@ const OPERATIONS = {
       if (!isText) throw new Error('Text style fields work only on text and plain captions')
       applyTextStyle(a, op, changed)
     }
-    applyClipLook(s, op, changed)
+    applyClipLook(draft, s, op, changed)
     if (changed.length === 0) throw new Error('update needs at least one field to change')
     if (isText) {
       const copies = syncStyleCopies(draft, s, before)
@@ -799,6 +880,10 @@ const OPERATIONS = {
   place(draft, op) {
     const s = find(draft, op.id)
     const changed = []
+    const main = s.type === 'VIDEO' && s.layout?.layer === 0
+    if (main && op.start_ms !== undefined) throw new Error(`${s.id} is on the main track, which CapCut keeps gap-free, so it can't be moved on its own. Trim it with duration_ms, remove it, or move it to an overlay layer`)
+    const oldEnd = s.timeline['start.ms'] + s.timeline['duration.ms']
+    const oldDuration = s.timeline['duration.ms']
     if (op.start_ms !== undefined || op.duration_ms !== undefined) delete s.timeline['end.ms'] // stale once moved or trimmed
     if (op.start_ms !== undefined) { s.timeline['start.ms'] = requireMs(op.start_ms, 'start_ms'); changed.push('start') }
     if (op.duration_ms !== undefined) {
@@ -813,6 +898,10 @@ const OPERATIONS = {
         else if (words.some(w => Number(w['end.ms']) > duration)) throw new Error(`${s.id}'s word timings run past ${duration} ms; change its text with update content first`)
       }
       s.timeline['duration.ms'] = duration; changed.push('duration')
+      if (main) {
+        const note = ripple(draft, s, oldEnd, duration - oldDuration)
+        if (note) changed.push(note.replace(/^; /, ''))
+      }
     }
     for (const key of ['position_x', 'position_y']) {
       if (op[key] !== undefined) {
@@ -823,8 +912,8 @@ const OPERATIONS = {
     if (op.layer !== undefined) { s.layout.layer = op.layer; changed.push('layer') }
     if (s.type !== 'AUDIO') applyTransform(s.layout, op, changed)
     if (changed.length === 0) throw new Error('place needs at least one field to change')
-    if (s.type === 'VIDEO') {
-      const before = visuals(draft).filter(o => o.type === 'VIDEO' && o.attributes?.transition)
+    if (s.type === 'VIDEO' && !main) {
+      const before = visuals(draft).filter(o => o.type === 'VIDEO' && o.layout.layer !== 0 && o.attributes?.transition)
       const dropped = dropBrokenTransitions(draft, before)
       if (dropped.length) changed.push(`transition removed from ${dropped.join(', ')} because its clips no longer touch`)
     }
@@ -935,6 +1024,11 @@ const OPERATIONS = {
       else out.push([...r])
       return out
     }, [])
+    // The track's own fade-in and fade-out need a part at least that long. A normal-volume stretch shorter than
+    // the fade at either end is folded into the quiet part next to it, so the fade isn't cut short.
+    const fadeIn = Number(a['fade_in.ms'] ?? 0), fadeOut = Number(a['fade_out.ms'] ?? 0)
+    if (fadeOut && E - ranges.at(-1)[1] < Math.max(fadeOut, 1)) ranges.at(-1)[1] = E
+    if (fadeIn && ranges[0][0] - S < Math.max(fadeIn, 1)) ranges[0][0] = S
     // Back-to-back parts covering [S, E]: [start, end, volume].
     const parts = []
     let at = S
@@ -960,7 +1054,7 @@ const OPERATIONS = {
       delete attributes['duration.ms']
       if (first) delete attributes['fade_in.ms']
       if (!first) attributes['fade_in.ms'] = Math.min(fade, end - start)
-      if (last) { delete attributes['fade_out.ms']; if (a['fade_out.ms'] !== undefined) attributes['fade_out.ms'] = a['fade_out.ms'] } else attributes['fade_out.ms'] = Math.min(fade, end - start)
+      if (last) { delete attributes['fade_out.ms']; if (a['fade_out.ms'] !== undefined) attributes['fade_out.ms'] = Math.min(a['fade_out.ms'], end - start) } else attributes['fade_out.ms'] = Math.min(fade, end - start)
       if (first && a['fade_in.ms'] !== undefined) attributes['fade_in.ms'] = a['fade_in.ms']
       const timeline = { 'start.ms': start, 'duration.ms': end - start }
       const layout = { ...(s.layout ?? {}), layer: i % 2 === 0 ? s.layout.layer : altLayer }
@@ -1013,12 +1107,16 @@ const OPERATIONS = {
       grew = false
       for (const x of draft.segments) if (!gone.has(x) && [...gone].some(g => g.id === x.parent_id)) { gone.add(x); grew = true }
     }
+    const main = s.type === 'VIDEO' && s.layout?.layer === 0
     const before = s.type === 'VIDEO' ? visuals(draft).filter(o => o !== s && o.type === 'VIDEO' && o.attributes?.transition) : []
     draft.segments = draft.segments.filter(x => !gone.has(x))
+    // On the main track, CapCut closes the gap; the transition into the removed clip then joins the next one.
+    const closed = main ? ripple(draft, s, s.timeline['start.ms'] + s.timeline['duration.ms'], -s.timeline['duration.ms']) : ''
     const dropped = dropBrokenTransitions(draft, before)
     const extra = gone.size > 1 ? ` with ${gone.size - 1} segment${gone.size > 2 ? 's' : ''} attached to it` : ''
+    const gap = main ? `. The main track closed up${closed}` : s.type === 'VIDEO' || s.type === 'AUDIO' ? '. The gap it leaves is not closed' : ''
     const note = dropped.length ? ` The transition on ${dropped.join(', ')} was removed too.` : ''
-    return `Removed ${s.type} ${s.id}${extra}. Gaps it leaves on the timeline are not closed.${note}`
+    return `Removed ${s.type} ${s.id}${extra}${gap}.${note}`
   },
 
   // {op, id, source?: "vimo://..." | null, duration_ms?: 500}: a transition from clip `id` into the clip that starts
@@ -1124,6 +1222,8 @@ export function applyOperations(input, operations) {
       throw new Error(`Operation ${index + 1} (${op.op}): ${error.message}`)
     }
   })
+  const repaired = repairStyleCopies(draft)
+  if (repaired) changes.push(`Restored outline, shadow or text effect on ${repaired} per-letter style cop${repaired > 1 ? 'ies' : 'y'} that CapCut had dropped them from`)
   const after = validate(draft)
   if (after.length) throw new Error(`The edited draft is invalid: ${after.join('; ')}`)
   return { draft, changes }
@@ -1166,14 +1266,18 @@ export function summarize(draft) {
     const extras = [
       strength !== undefined ? ` at ${Math.round(Number(strength) * 100)}%` : '',
       a.transition ? ` then transition ${a.transition} (${a['transition.duration.ms']} ms)` : '',
-      a.blend_mode ? ` blend ${a.blend_mode}` : '',
-      a.matting === true ? ' background removed' : '',
+      a.blend_mode ? ` blend ${BLEND_NAMES[a.blend_mode] ?? a.blend_mode}${s.layout?.alpha !== undefined ? ` at ${Math.round(s.layout.alpha * 100)}%` : ''}` : '',
+      s.type === 'VIDEO' && hasCutout(draft, s) ? ' background removed' : '',
       children(draft, s.id).filter(c => EFFECT_TYPES.has(c.type)).map(c => ` with ${c.type === 'COLOR_FILTER' ? 'filter' : 'effect'} ${c.id}`).join(''),
     ].join('')
     lines.push(`${s.id.padEnd(12)} ${String(s.type).padEnd(5)} layer ${String(s.layout?.layer).padEnd(4)} ${fmt(t['start.ms'])}-${fmt(t['start.ms'] + t['duration.ms'])}  ${what}${range}${speed}${extras}`)
   }
   const other = draft.segments.filter(s => s.type !== 'DRAFT' && !s.timeline)
   if (other.length) lines.push(`Other segments kept unchanged: ${other.map(s => `${s.id} (${s.type})`).join(', ')}`)
+  const unsafe = safeZoneProblems(draft)
+  if (unsafe.length) lines.push(`Warning: text near the edge of a vertical frame, where Instagram or TikTok buttons and captions may cover it: ${unsafe.join(', ')}`)
+  const wide = overflowProblems(draft)
+  if (wide.length) lines.push(`Warning: template text that may run off the frame (templates don't wrap; split the line or scale down): ${wide.join(', ')}`)
   const broken = fontProblems(draft)
   if (broken.length) lines.push(`Warning: text with a font that is not a CapCut library font (may render in a fallback font): ${broken.join(', ')}`)
   return lines.join('\n')

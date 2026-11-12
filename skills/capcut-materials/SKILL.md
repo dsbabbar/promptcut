@@ -45,4 +45,4 @@ Every type can be added to a draft with the `capcut-draft` skill, using each ite
 | `filter` | `add_filter` |
 | `video_effect`, `face_effect` | `add_effect` (a face effect is an ordinary video effect in a draft) |
 
-These were added in promptcut 0.4.0 and haven't all been checked in a real draft yet.
+These were tested in a real draft in promptcut 0.4.0.

@@ -87,9 +87,9 @@ Questions? See the [FAQ](docs/faq.md) and [Known issues](docs/known-issues.md). 
 | Overlays and styling | "Put my logo bottom-right, fill the background behind the landscape clip with a blur, and give the title a black outline" | Available |
 | Music control | "Start the song at the chorus, add a whoosh at 3 seconds and lower the music while I talk" | Available (lowering the music is new and not yet checked in a real draft) |
 | Speed and speed ramps | "Play the hallway clip at 2x and give the stair climb the Hero curve" | New (constant speed and ramps on video clips; ramps not yet checked in a real draft) |
-| Transitions, filters and effects | "Add a dissolve between every clip, a warm filter over the whole video and a flash on the drop" | New in 0.4.0, not yet checked in a real draft |
-| Titles and text looks | "Add a bold animated title template, give the captions a gold text effect and make the side label vertical" | New in 0.4.0, not yet checked in a real draft |
-| Canvas, blend and cutout | "Make this a 9:16 reel, blend the light-leak clip in with Screen and cut me out of the background" | New in 0.4.0, not yet checked in a real draft |
+| Transitions, filters and effects | "Add a dissolve between every clip, a warm filter over the whole video and a flash on the drop" | Available (tested in a real draft) |
+| Titles and text looks | "Add a bold animated title template, give the captions a gold text effect and make the side label vertical" | Available (tested; text effects fixed in 0.4.1) |
+| Canvas, blend and cutout | "Make this a 9:16 reel, blend the light-leak clip in with Screen and cut me out of the background" | Available (Screen blend fixed in 0.4.1; cutout shows in the desktop app) |
 | Slide decks | "Make a 10-slide pitch deck from these notes and export a PDF" | New: HTML decks with presenter view; PDF, PNG and PowerPoint export |
 | Slideshow video | "Turn this deck into a video with calm music" | New: builds a CapCut draft with one image per slide |
 

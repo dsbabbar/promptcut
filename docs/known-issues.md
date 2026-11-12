@@ -46,15 +46,59 @@ If you find a new one, [open an issue](https://github.com/dsbabbar/promptcut/iss
 
 ### Text styling can fade after later saves
 
-**What happens:** a title's outline and shadow can look fainter after Claude saves the draft a few more times. This hasn't been confirmed.
+**What happens:** a title's outline and shadow get thinner after Claude saves the draft a few more times, and a text effect (word art) can disappear. Seen in a real test of 0.4.0.
 
-**Why:** CapCut keeps per-letter style copies for text and treats them as the truth, so a style change made only on the text can be undone on save. Since 0.4.0, promptcut writes its style changes to those copies too, which should stop this.
+**Why:** CapCut keeps per-letter style copies for text, treats them as the truth, and drops the outline, shadow and text effect from them over repeated saves.
 
-**What to do:** if it still happens, ask Claude to restyle the text, or fix it in the editor after Claude's last change.
+**What to do:** nothing in most cases. Since 0.4.1, promptcut fills those values back in from the text before every save. If a style still fades, ask Claude to restyle the text, or fix it in the editor after Claude's last change.
+
+### Word timings don't show in the editor
+
+**What happens:** promptcut saves word-by-word timings with captions, but CapCut's editor doesn't show them.
+
+**What to do:** nothing. The captions themselves are correct.
+
+### Each text gets its own track
+
+**What happens:** CapCut puts every title or label on a track of its own, even when promptcut puts them on one layer.
+
+**What to do:** nothing. It's how CapCut lays out text.
+
+### Text templates can lose their text
+
+**What happens:** after several more saves, a text template can show "Text is no longer available", or its text can change to a plain serif font instead of the template's look.
+
+**What to do:** add text templates in the last edit round, or re-add the template (ask Claude to remove it and add it again).
 
 ### Sound effects are relabelled as music
 
 **What happens:** after a later save, a sound effect may be labelled as music in CapCut. It still plays the same.
+
+### Blend modes other than Screen
+
+**What happens:** promptcut can set the Screen blend mode, but not others by name.
+
+**Why:** CapCut stores blend modes as library resources, and only Screen's is known.
+
+**What to do:** set the mode once on any clip in the CapCut editor (Overlay, Darken or Brighten). Claude can then copy it to other clips.
+
+### Background removal shows only in the desktop app
+
+**What happens:** a clip with its background removed (cutout) looks unchanged in the CapCut web editor's preview.
+
+**What to do:** check it in the CapCut desktop app, where it shows. Automatic background removal is a CapCut Pro feature.
+
+### The desktop app asks to download or link media
+
+**What happens:** opening a promptcut draft in the CapCut desktop app can ask "Download the latest version before editing?", and then ask you to link a missing media file that isn't one of yours (often a generated cutout). Closing the draft can save a separate local copy.
+
+**What to do:** choose to download and edit. Cancel the link prompt; everything still opens. Delete the local copy only after checking that the cloud draft (the one the web link opens) has everything.
+
+### Drafts with Pro features may not open on the phone
+
+**What happens:** a draft that uses Pro features, such as bubbles or automatic background removal, may fail to download in the CapCut phone app, with no error.
+
+**What to do:** open it on the web or in the desktop app, or check that your CapCut Pro membership is active.
 
 ### A deleted draft can't be saved to
 
