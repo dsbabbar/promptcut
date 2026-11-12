@@ -114,6 +114,18 @@ const RAMP_SHAPES = {
   slow_middle: peak => [[0, peak], [0.25, 1], [0.75, 1], [1, peak]],
 }
 
+// CapCut's own curve presets, with the same names as in its Speed > Curve panel. The points are read from
+// the panel's graphs (dashed lines at 5x and 0.5x); each gives the clip length CapCut shows for a
+// 6-second clip, to within its rounding (montage 3s, hero 3s, bullet 2s, jump_cut 9s, flash_in 3s, flash_out 3s).
+const CAPCUT_PRESETS = {
+  montage: [[0, 5], [0.1, 5], [0.28, 2.7], [0.5, 7.7], [0.65, 1], [1, 1]],
+  hero: [[0, 1], [0.35, 5], [0.44, 0.5], [0.55, 0.5], [0.65, 5], [1, 1]],
+  bullet: [[0, 5], [0.41, 5], [0.47, 0.5], [0.55, 0.5], [0.61, 5], [1, 5]],
+  jump_cut: [[0, 0.6], [0.43, 0.6], [0.5, 5], [0.57, 0.6], [1, 0.6]],
+  flash_in: [[0, 5], [0.4, 5], [0.6, 1], [1, 1]],
+  flash_out: [[0, 1], [0.4, 1], [0.6, 5], [1, 5]],
+}
+
 function checkSpeed(value, name) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < MIN_SPEED || value > MAX_SPEED) {
     throw new Error(`${name} must be a number from ${MIN_SPEED} to ${MAX_SPEED}`)
@@ -411,9 +423,10 @@ const OPERATIONS = {
     return `Set ${s.id} to ${speed}x: ${retime(draft, s)}`
   },
 
-  // {op, id, shape?: "ramp_up" | "ramp_down" | "fast_middle" | "slow_middle", peak?, points?: [{x, y}]}
-  // A speed ramp on a video clip, written as CapCut's curve_speed. Give a shape (peak speed, default 3; for
-  // slow_middle the ends run at peak and the middle at normal speed) or custom points.
+  // {op, id, shape?, peak?, points?: [{x, y}]}
+  // A speed ramp on a video clip, written as CapCut's curve_speed. shape is one of CapCut's presets (montage,
+  // hero, bullet, jump_cut, flash_in, flash_out) or a basic shape (ramp_up, ramp_down, fast_middle,
+  // slow_middle; peak speed, default 3, and for slow_middle the ends run at peak). Or give custom points.
   speed_ramp(draft, op) {
     const s = speedableVideo(draft, op.id)
     let points
@@ -421,14 +434,15 @@ const OPERATIONS = {
       if (op.shape !== undefined) throw new Error('Give shape or points, not both')
       points = checkCurve(op.points)
     } else {
-      const make = RAMP_SHAPES[op.shape]
-      if (!make) throw new Error(`shape must be one of ${Object.keys(RAMP_SHAPES).join(', ')}, or give points`)
-      const peak = checkSpeed(op.peak ?? 3, 'peak')
-      points = make(peak).map(([x, y]) => ({ x, y }))
+      const preset = Object.hasOwn(CAPCUT_PRESETS, op.shape) ? CAPCUT_PRESETS[op.shape] : null
+      const make = Object.hasOwn(RAMP_SHAPES, op.shape) ? RAMP_SHAPES[op.shape] : null
+      if (!preset && !make) throw new Error(`shape must be one of ${[...Object.keys(CAPCUT_PRESETS), ...Object.keys(RAMP_SHAPES)].join(', ')}, or give points`)
+      if (preset && op.peak !== undefined) throw new Error(`peak works only with ${Object.keys(RAMP_SHAPES).join(', ')}; ${op.shape} is a fixed CapCut preset`)
+      points = (preset ?? make(checkSpeed(op.peak ?? 3, 'peak'))).map(([x, y]) => ({ x, y }))
     }
     delete s.attributes.speed
     s.attributes.curve_speed = JSON.stringify(points)
-    const label = op.shape ? `${op.shape.replace('_', ' ')} ramp` : 'custom speed ramp'
+    const label = op.shape ? `${op.shape.replace('_', ' ')} ${Object.hasOwn(CAPCUT_PRESETS, op.shape) ? 'curve' : 'ramp'}` : 'custom speed ramp'
     return `Added a ${label} to ${s.id}: ${retime(draft, s)}`
   },
 

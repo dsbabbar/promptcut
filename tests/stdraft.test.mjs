@@ -240,3 +240,22 @@ test('speed_ramp writes a CapCut speed curve and retimes the clip', () => {
   const bad = sampleDraft(); bad.segments[1].attributes.curve_speed = '[{"x":0,"y":1}]'
   assert.match(validate(bad).join('\n'), /invalid curve_speed/)
 })
+
+test('CapCut curve presets give the clip lengths CapCut shows for a 6-second clip', () => {
+  const six = () => {
+    const d = sampleDraft()
+    Object.assign(d.segments[1], { timeline: { 'start.ms': 0, 'duration.ms': 6000 } })
+    Object.assign(d.segments[1].attributes, { 'start.ms': 0, 'end.ms': 6000 })
+    d.segments[2].timeline['start.ms'] = 6000
+    return d
+  }
+  const expected = { montage: 3, hero: 3, bullet: 2, jump_cut: 9, flash_in: 3, flash_out: 3 }
+  for (const [shape, seconds] of Object.entries(expected)) {
+    const { draft, changes } = applyOperations(six(), [{ op: 'speed_ramp', id: 'clip_a', shape }])
+    const ms = draft.segments.find(s => s.id === 'clip_a').timeline['duration.ms']
+    assert.ok(Math.abs(ms / 1000 - seconds) < 0.5, `${shape}: ${ms} ms, CapCut shows ${seconds}s`)
+    assert.match(changes[0], /curve to clip_a/)
+    assert.deepEqual(validate(draft), [])
+  }
+  assert.throws(() => applyOperations(six(), [{ op: 'speed_ramp', id: 'clip_a', shape: 'hero', peak: 4 }]), /fixed CapCut preset/)
+})
