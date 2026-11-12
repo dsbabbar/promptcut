@@ -100,6 +100,99 @@ export function draftDuration(draft) {
   return Math.max(0, ...draft.segments.filter(s => s.timeline).map(s => s.timeline['start.ms'] + s.timeline['duration.ms']))
 }
 
+// ------------------------------------------------------------------ speed
+
+export const MIN_SPEED = 0.1
+export const MAX_SPEED = 100
+
+// Named ramp shapes. x is the position through the clip (0 = start, 1 = end); y is the speed there, as a
+// multiple of `peak` (1 = peak speed) or normal speed (marked n). Each becomes a CapCut speed curve.
+const RAMP_SHAPES = {
+  ramp_up: peak => [[0, 1], [1, peak]],
+  ramp_down: peak => [[0, peak], [1, 1]],
+  fast_middle: peak => [[0, 1], [0.25, peak], [0.75, peak], [1, 1]],
+  slow_middle: peak => [[0, peak], [0.25, 1], [0.75, 1], [1, peak]],
+}
+
+// CapCut's own curve presets, with the same names as in its Speed > Curve panel. The points are read from
+// the panel's graphs (dashed lines at 5x and 0.5x); each gives the clip length CapCut shows for a
+// 6-second clip, to within its rounding (montage 3s, hero 3s, bullet 2s, jump_cut 9s, flash_in 3s, flash_out 3s).
+const CAPCUT_PRESETS = {
+  montage: [[0, 5], [0.1, 5], [0.28, 2.7], [0.5, 7.7], [0.65, 1], [1, 1]],
+  hero: [[0, 1], [0.35, 5], [0.44, 0.5], [0.55, 0.5], [0.65, 5], [1, 1]],
+  bullet: [[0, 5], [0.41, 5], [0.47, 0.5], [0.55, 0.5], [0.61, 5], [1, 5]],
+  jump_cut: [[0, 0.6], [0.43, 0.6], [0.5, 5], [0.57, 0.6], [1, 0.6]],
+  flash_in: [[0, 5], [0.4, 5], [0.6, 1], [1, 1]],
+  flash_out: [[0, 1], [0.4, 1], [0.6, 5], [1, 5]],
+}
+
+function checkSpeed(value, name) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < MIN_SPEED || value > MAX_SPEED) {
+    throw new Error(`${name} must be a number from ${MIN_SPEED} to ${MAX_SPEED}`)
+  }
+  return value
+}
+
+// Points [{x, y}]: x from 0 to 1 in increasing order, starting at 0 and ending at 1; y is a speed.
+function checkCurve(points) {
+  if (!Array.isArray(points) || points.length < 2) throw new Error('points needs at least two {x, y} points')
+  const clean = points.map((p, i) => {
+    if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') throw new Error(`point ${i + 1} needs numeric x and y`)
+    if (p.x < 0 || p.x > 1) throw new Error(`point ${i + 1}: x must be from 0 to 1`)
+    return { x: p.x, y: checkSpeed(p.y, `point ${i + 1} y`) }
+  })
+  for (let i = 1; i < clean.length; i++) if (clean[i].x <= clean[i - 1].x) throw new Error('point x values must increase')
+  if (clean[0].x !== 0 || clean.at(-1).x !== 1) throw new Error('points must start at x 0 and end at x 1')
+  return clean
+}
+
+// The average playback speed of a curve whose x runs through the source: total source divided by total
+// playback time. Each stretch between two points plays at the mean of its end speeds, the same estimate
+// CapCut's draft tools use, so clip lengths match what CapCut computes.
+export function curveAverageSpeed(points) {
+  let playback = 0
+  for (let i = 1; i < points.length; i++) playback += (points[i].x - points[i - 1].x) / ((points[i].y + points[i - 1].y) / 2)
+  return 1 / playback
+}
+
+export function speedOf(segment) {
+  const a = segment.attributes ?? {}
+  if (typeof a.curve_speed === 'string') {
+    try { return curveAverageSpeed(checkCurve(JSON.parse(a.curve_speed))) } catch { return 1 }
+  }
+  return typeof a.speed === 'number' && a.speed > 0 ? a.speed : 1
+}
+
+function speedableVideo(draft, id) {
+  const s = find(draft, id)
+  if (s.type !== 'VIDEO') throw new Error(`${id} is ${s.type}, not a video clip`)
+  if (s.attributes?.meta_type === 'photo') throw new Error(`${id} is a still image, which can't change speed`)
+  const a = s.attributes ?? {}
+  if (!Number.isInteger(a['start.ms']) || !Number.isInteger(a['end.ms'])) throw new Error(`${id} has no source range to retime`)
+  return s
+}
+
+// Sets a clip's timeline length from its source range and speed. On the main track, later clips move with it.
+function retime(draft, s) {
+  const a = s.attributes
+  const oldEnd = s.timeline['start.ms'] + s.timeline['duration.ms']
+  const duration = Math.max(1, Math.round((a['end.ms'] - a['start.ms']) / speedOf(s)))
+  const delta = duration - s.timeline['duration.ms']
+  s.timeline['duration.ms'] = duration
+  let moved = 0
+  if (delta !== 0 && s.layout?.layer === 0) {
+    for (const other of draft.segments) {
+      if (other !== s && other.type === 'VIDEO' && other.layout?.layer === 0 && other.timeline && other.timeline['start.ms'] >= oldEnd) {
+        other.timeline['start.ms'] += delta
+        moved++
+      }
+    }
+  }
+  const change = delta === 0 ? 'length unchanged' : `${delta < 0 ? 'shorter' : 'longer'} by ${(Math.abs(delta) / 1000).toFixed(1)}s`
+  const note = moved ? `; ${moved} later main-track clip${moved > 1 ? 's' : ''} moved to match. Text, captions and audio were not moved` : ''
+  return `now ${(duration / 1000).toFixed(1)}s (${change})${note}`
+}
+
 // ------------------------------------------------------------------ validation
 
 export function validate(draft) {
@@ -126,6 +219,9 @@ export function validate(draft) {
     if ((s.type === 'VIDEO' || s.type === 'AUDIO') && typeof a.source !== 'string') errors.push(`${label} needs a source`)
     if ('start.ms' in a && 'end.ms' in a && a['end.ms'] <= a['start.ms']) errors.push(`${label} has a source range that ends before it starts`)
     if (s.type === 'VIDEO' && a.meta_type === 'photo' && ('speed' in a || 'curve_speed' in a)) errors.push(`${label} is a still image, which cannot have speed or curve_speed`)
+    if ('curve_speed' in a) {
+      try { checkCurve(JSON.parse(a.curve_speed)) } catch (e) { errors.push(`${label} has an invalid curve_speed: ${e.message}`) }
+    }
   }
   const mainTrack = draft.segments.filter(s => s.type === 'VIDEO' && s.layout?.layer === 0)
     .sort((x, y) => x.timeline['start.ms'] - y.timeline['start.ms'])
@@ -281,7 +377,7 @@ const OPERATIONS = {
     if (op.duration_ms !== undefined) {
       const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
       const isPhoto = s.attributes?.meta_type === 'photo'
-      if (s.type === 'VIDEO' && !isPhoto && 'start.ms' in (s.attributes ?? {})) s.attributes['end.ms'] = s.attributes['start.ms'] + duration
+      if (s.type === 'VIDEO' && !isPhoto && 'start.ms' in (s.attributes ?? {})) s.attributes['end.ms'] = s.attributes['start.ms'] + Math.round(duration * speedOf(s))
       s.timeline['duration.ms'] = duration; changed.push('duration')
     }
     for (const key of ['position_x', 'position_y']) {
@@ -314,6 +410,40 @@ const OPERATIONS = {
     }
     const used = [...new Set(placed.map(p => p.layer))].sort((a, b) => a - b)
     return `Put ${captions.length} captions on layer${used.length > 1 ? 's' : ''} ${used.join(', ')}`
+  },
+
+  // {op, id, speed}: plays a video clip at a constant speed (2 = twice as fast, 0.5 = half speed, 1 = normal).
+  // Replaces any speed ramp. The clip's length changes to match; later main-track clips move with it.
+  set_speed(draft, op) {
+    const s = speedableVideo(draft, op.id)
+    const speed = checkSpeed(op.speed, 'speed')
+    delete s.attributes.curve_speed
+    if (speed === 1) delete s.attributes.speed
+    else s.attributes.speed = speed
+    return `Set ${s.id} to ${speed}x: ${retime(draft, s)}`
+  },
+
+  // {op, id, shape?, peak?, points?: [{x, y}]}
+  // A speed ramp on a video clip, written as CapCut's curve_speed. shape is one of CapCut's presets (montage,
+  // hero, bullet, jump_cut, flash_in, flash_out) or a basic shape (ramp_up, ramp_down, fast_middle,
+  // slow_middle; peak speed, default 3, and for slow_middle the ends run at peak). Or give custom points.
+  speed_ramp(draft, op) {
+    const s = speedableVideo(draft, op.id)
+    let points
+    if (op.points !== undefined) {
+      if (op.shape !== undefined) throw new Error('Give shape or points, not both')
+      points = checkCurve(op.points)
+    } else {
+      const preset = Object.hasOwn(CAPCUT_PRESETS, op.shape) ? CAPCUT_PRESETS[op.shape] : null
+      const make = Object.hasOwn(RAMP_SHAPES, op.shape) ? RAMP_SHAPES[op.shape] : null
+      if (!preset && !make) throw new Error(`shape must be one of ${[...Object.keys(CAPCUT_PRESETS), ...Object.keys(RAMP_SHAPES)].join(', ')}, or give points`)
+      if (preset && op.peak !== undefined) throw new Error(`peak works only with ${Object.keys(RAMP_SHAPES).join(', ')}; ${op.shape} is a fixed CapCut preset`)
+      points = (preset ?? make(checkSpeed(op.peak ?? 3, 'peak'))).map(([x, y]) => ({ x, y }))
+    }
+    delete s.attributes.speed
+    s.attributes.curve_speed = JSON.stringify(points)
+    const label = op.shape ? `${op.shape.replace('_', ' ')} ${Object.hasOwn(CAPCUT_PRESETS, op.shape) ? 'curve' : 'ramp'}` : 'custom speed ramp'
+    return `Added a ${label} to ${s.id}: ${retime(draft, s)}`
   },
 
   // {op, id}
@@ -371,7 +501,8 @@ export function summarize(draft) {
     const a = s.attributes ?? {}
     const what = s.type === 'TEXT' ? `"${a.content}"${a.font ? ` font ${a.font}` : ''}` : `${a.source ?? ''}${a.meta_type === 'photo' ? ' (still image)' : ''}`
     const range = 'start.ms' in a && 'end.ms' in a ? ` from source ${fmt(a['start.ms'])}-${fmt(a['end.ms'])}` : ''
-    lines.push(`${s.id.padEnd(12)} ${String(s.type).padEnd(5)} layer ${String(s.layout?.layer).padEnd(4)} ${fmt(t['start.ms'])}-${fmt(t['start.ms'] + t['duration.ms'])}  ${what}${range}`)
+    const speed = typeof a.curve_speed === 'string' ? ` speed ramp (average ${speedOf(s).toFixed(2)}x)` : typeof a.speed === 'number' && a.speed !== 1 ? ` at ${a.speed}x` : ''
+    lines.push(`${s.id.padEnd(12)} ${String(s.type).padEnd(5)} layer ${String(s.layout?.layer).padEnd(4)} ${fmt(t['start.ms'])}-${fmt(t['start.ms'] + t['duration.ms'])}  ${what}${range}${speed}`)
   }
   const other = draft.segments.filter(s => s.type !== 'DRAFT' && !s.timeline)
   if (other.length) lines.push(`Other segments kept unchanged: ${other.map(s => `${s.id} (${s.type})`).join(', ')}`)

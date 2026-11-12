@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyOperations, draftDuration, fontProblems, newDraft, summarize, validate } from '../scripts/stdraft.mjs'
+import { applyOperations, curveAverageSpeed, draftDuration, fontProblems, newDraft, summarize, validate } from '../scripts/stdraft.mjs'
 
 const script = fileURLToPath(new URL('../scripts/stdraft.mjs', import.meta.url))
 
@@ -196,4 +196,66 @@ test('validation rejects speed on still images', () => {
   const { draft } = applyOperations(newDraft(1920, 1080), [{ op: 'add_image', source: 'tos://x/y', duration_ms: 1000 }])
   draft.segments.find(s => s.type === 'VIDEO').attributes.speed = 2
   assert.match(validate(draft).join('\n'), /cannot have speed/)
+})
+
+test('set_speed retimes a clip and moves later main-track clips', () => {
+  const { draft, changes } = applyOperations(sampleDraft(), [{ op: 'set_speed', id: 'clip_a', speed: 2 }])
+  const a = draft.segments.find(s => s.id === 'clip_a')
+  const b = draft.segments.find(s => s.id === 'clip_b')
+  assert.equal(a.attributes.speed, 2)
+  assert.equal(a.timeline['duration.ms'], 1500)
+  assert.equal(b.timeline['start.ms'], 1500, 'the next clip moves up')
+  assert.equal(draft.segments.find(s => s.id === 'title').timeline['start.ms'], 0, 'text is not moved')
+  assert.match(changes[0], /2x: now 1.5s \(shorter by 1.5s\); 1 later main-track clip moved/)
+  assert.deepEqual(validate(draft), [])
+  const back = applyOperations(draft, [{ op: 'set_speed', id: 'clip_a', speed: 1 }]).draft
+  assert.equal('speed' in back.segments.find(s => s.id === 'clip_a').attributes, false)
+  assert.equal(back.segments.find(s => s.id === 'clip_b').timeline['start.ms'], 3000)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'set_speed', id: 'clip_a', speed: 0 }]), /speed must be/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'set_speed', id: 'title', speed: 2 }]), /not a video clip/)
+})
+
+test('speed_ramp writes a CapCut speed curve and retimes the clip', () => {
+  assert.equal(curveAverageSpeed([{ x: 0, y: 2 }, { x: 1, y: 2 }]), 2)
+  assert.ok(Math.abs(curveAverageSpeed([{ x: 0, y: 1 }, { x: 0.25, y: 3 }, { x: 0.75, y: 3 }, { x: 1, y: 1 }]) - 2.4) < 1e-9)
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'set_speed', id: 'clip_a', speed: 2 },
+    { op: 'speed_ramp', id: 'clip_a', shape: 'fast_middle' },
+  ])
+  const a = draft.segments.find(s => s.id === 'clip_a')
+  assert.equal('speed' in a.attributes, false, 'a ramp replaces a constant speed')
+  assert.deepEqual(JSON.parse(a.attributes.curve_speed), [{ x: 0, y: 1 }, { x: 0.25, y: 3 }, { x: 0.75, y: 3 }, { x: 1, y: 1 }])
+  assert.equal(a.timeline['duration.ms'], 1250)
+  assert.equal(draft.segments.find(s => s.id === 'clip_b').timeline['start.ms'], 1250)
+  assert.match(summarize(draft), /speed ramp \(average 2.40x\)/)
+  assert.deepEqual(validate(draft), [])
+  // Trimming a ramped clip keeps the source range in step with its speed.
+  const trimmed = applyOperations(draft, [{ op: 'place', id: 'clip_a', duration_ms: 1000 }]).draft
+  assert.equal(trimmed.segments.find(s => s.id === 'clip_a').attributes['end.ms'], 2400)
+  const custom = applyOperations(sampleDraft(), [{ op: 'speed_ramp', id: 'clip_b', points: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }] }]).draft
+  assert.equal(custom.segments.find(s => s.id === 'clip_b').timeline['duration.ms'], 4000)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'speed_ramp', id: 'clip_a', shape: 'zoom' }]), /shape must be/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'speed_ramp', id: 'clip_a', points: [{ x: 0, y: 1 }, { x: 0.5, y: 2 }] }]), /end at x 1/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'speed_ramp', id: 'clip_a', points: [{ x: 0, y: 1 }, { x: 1, y: 0 }] }]), /y must be/)
+  const bad = sampleDraft(); bad.segments[1].attributes.curve_speed = '[{"x":0,"y":1}]'
+  assert.match(validate(bad).join('\n'), /invalid curve_speed/)
+})
+
+test('CapCut curve presets give the clip lengths CapCut shows for a 6-second clip', () => {
+  const six = () => {
+    const d = sampleDraft()
+    Object.assign(d.segments[1], { timeline: { 'start.ms': 0, 'duration.ms': 6000 } })
+    Object.assign(d.segments[1].attributes, { 'start.ms': 0, 'end.ms': 6000 })
+    d.segments[2].timeline['start.ms'] = 6000
+    return d
+  }
+  const expected = { montage: 3, hero: 3, bullet: 2, jump_cut: 9, flash_in: 3, flash_out: 3 }
+  for (const [shape, seconds] of Object.entries(expected)) {
+    const { draft, changes } = applyOperations(six(), [{ op: 'speed_ramp', id: 'clip_a', shape }])
+    const ms = draft.segments.find(s => s.id === 'clip_a').timeline['duration.ms']
+    assert.ok(Math.abs(ms / 1000 - seconds) < 0.5, `${shape}: ${ms} ms, CapCut shows ${seconds}s`)
+    assert.match(changes[0], /curve to clip_a/)
+    assert.deepEqual(validate(draft), [])
+  }
+  assert.throws(() => applyOperations(six(), [{ op: 'speed_ramp', id: 'clip_a', shape: 'hero', peak: 4 }]), /fixed CapCut preset/)
 })
