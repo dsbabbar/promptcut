@@ -148,7 +148,7 @@ Yes. Your own edits always win. If you save in any CapCut app (web, desktop or m
 
 ### What can promptcut change in a draft?
 
-Text, captions, music, sound effects and main-track video clips, including volume, fades, moving, trimming and removing. Filters, transitions, video effects, text templates, stickers and picture-in-picture aren't supported yet. Add those in the CapCut editor.
+Text, captions, music, sound effects, main-track video clips and still images, including volume, fades, moving, trimming and removing. Video clips can also change speed: a constant speed ("play the hallway clip at 2x") or a speed ramp ("speed-ramp the stair climb": fast in the middle, normal at both ends). Later clips move to match the new length. Filters, transitions, video effects, text templates, stickers and picture-in-picture aren't supported yet. Add those in the CapCut editor.
 
 ### Why does my text wrap differently in the web editor and the desktop app?
 

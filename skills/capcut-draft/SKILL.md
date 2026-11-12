@@ -42,6 +42,8 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
    | `update` | `id`, then any of `content`, `volume`, `font_size`, `font_color`, `font`, `fade_in_ms`, `fade_out_ms` | Changes a segment in place. Never add a new segment and call it an update. |
    | `place` | `id`, then any of `start_ms`, `duration_ms`, `position_x`, `position_y`, `layer` | Moves, trims or repositions a segment |
    | `remove` | `id` | Deletes a segment. Gaps it leaves are not closed. |
+   | `set_speed` | `id`, `speed` (0.1 to 100; 2 = twice as fast, 0.5 = half speed, 1 = normal) | Constant speed for a video clip. Replaces any ramp. |
+   | `speed_ramp` | `id`, then `shape` (`ramp_up`, `ramp_down`, `fast_middle`, `slow_middle`) with optional `peak` (default 3), or `points: [{x, y}]` | A speed ramp on a video clip. `x` runs from 0 (start of the clip) to 1 (end) and `y` is the speed there. `fast_middle` speeds through the middle and returns to normal at both ends, as for a stair climb. |
    | `reset_caption_layers` | optional `layer` (default 1) | Puts all captions back on the lowest layers, one layer when they don't overlap in time. |
 
    **Always set `font` on text you add or restyle.** Without one, the CapCut web editor and desktop app each substitute their own default font, so the same text can wrap differently. `font` takes a font's `vimo://<id>` `stdraft_uri` from `capcut-materials`. Unless the user named a font, search fonts once per conversation (`search_capcut_material` with `type: "font"`, `top_n: 20`), pick a clean, legible sans-serif from the descriptions, tell the user which one you chose, and reuse it for all new text.
@@ -69,7 +71,9 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
 
 ## Limits of this version
 
-- Supported: text, captions, music and sound effects, main-track video clips and still images, volume and fades, moving, trimming and removing segments.
+- Supported: text, captions, music and sound effects, main-track video clips and still images, volume and fades, constant speed and speed ramps on video clips, moving, trimming and removing segments.
+
+**Speed changes change a clip's length.** `set_speed` and `speed_ramp` recalculate the clip's length from its speed, and later clips on the main track move to match. Text, captions and music don't move, so tell the user when timings that depended on the old length may now be off, and offer to shift them with `place`. Still images can't change speed. Speed ramps follow CapCut's draft format, but how a ramp looks hasn't been checked in a real CapCut draft yet: after the first save with a ramp, ask the user to play the clip in the editor and tell you if it looks wrong.
 - Not yet supported: filters, transitions, video effects, text effects, text templates, picture-in-picture and stickers. If asked for these, say so, and offer to find the material with `capcut-materials` so the user can apply it in the web editor.
 - CapCut converts drafts between its cloud format and STDraft, so a document read back can differ slightly from the one saved. Always continue from the read-back version.
 - Do not use the CapCut desktop app, browser automation or Computer Use to edit drafts.

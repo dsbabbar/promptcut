@@ -84,6 +84,7 @@ Questions? See the [FAQ](docs/faq.md) and [Known issues](docs/known-issues.md). 
 | AI rough cut | "Cut these clips into a 30-second highlight reel" | Available |
 | Local uploads | "Use ./footage/intro.mp4 as the reference" | Available |
 | Draft editing | "Add the music and captions to my draft" | Available (drafts sync to every CapCut app signed in to your account) |
+| Speed and speed ramps | "Play the hallway clip at 2x and speed-ramp the stair climb" | New (constant speed and ramps on video clips; ramps not yet checked in a real draft) |
 | Slide decks | "Make a 10-slide pitch deck from these notes and export a PDF" | New: HTML decks with presenter view; PDF, PNG and PowerPoint export |
 | Slideshow video | "Turn this deck into a video with calm music" | New: builds a CapCut draft with one image per slide |
 
@@ -116,7 +117,7 @@ A regular claude.ai chat or a cloud session cannot use promptcut, because CapCut
 These are things promptcut doesn't do yet. For problems on CapCut's side, such as drafts losing their names, duplicate copies from the desktop app and captions on two tracks, see [Known issues](docs/known-issues.md).
 
 - **Claude Code only.** CapCut's login accepts local callback addresses only, so the claude.ai website and cloud sessions cannot connect. CapCut's interactive cards are not shown; promptcut asks questions and shows results in the chat instead.
-- **Draft editing** covers text, captions, music, sound effects, main-track video clips and still images. Filters, transitions, effects, text templates, stickers and picture-in-picture must be added in the CapCut web editor for now.
+- **Draft editing** covers text, captions, music, sound effects, main-track video clips and still images, plus constant speed and speed ramps on video clips (speed ramps are new and not yet checked in a real draft). Filters, transitions, effects, text templates, stickers and picture-in-picture must be added in the CapCut web editor for now.
 - **Captions for mixed-language videos** may miss short phrases in the second language. promptcut never fills gaps with its own translation; it tells you which parts have no captions.
 - **Fonts:** promptcut sets a CapCut library font on text it adds, so it looks the same in the web editor and the desktop app. Text without a font, or with a local font saved by the desktop app, can wrap differently between the two.
 - **AI rough cuts** may use subscription credits and do not show a quote before starting.
