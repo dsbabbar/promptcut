@@ -70,7 +70,7 @@ Uploading local files uses CapCut's `capcut_asset_upload_credential` tool, which
 
 If you previously added CapCut's servers by hand, remove them so each tool is listed once: `claude mcp remove capcut` and `claude mcp remove capcut-cards`.
 
-Questions? See the [FAQ](docs/faq.md). Not sure whether promptcut or editing CapCut's local project files fits your project better? See [Choosing a workflow](docs/choosing-a-workflow.md).
+Questions? See the [FAQ](docs/faq.md) and [Known issues](docs/known-issues.md). Not sure whether promptcut or editing CapCut's local project files fits your project better? See [Choosing a workflow](docs/choosing-a-workflow.md).
 
 ## What you can ask for
 
@@ -113,14 +113,11 @@ A regular claude.ai chat or a cloud session cannot use promptcut, because CapCut
 
 ## Known limitations
 
+These are things promptcut doesn't do yet. For problems on CapCut's side, such as drafts losing their names, duplicate copies from the desktop app and captions on two tracks, see [Known issues](docs/known-issues.md).
+
 - **Claude Code only.** CapCut's login accepts local callback addresses only, so the claude.ai website and cloud sessions cannot connect. CapCut's interactive cards are not shown; promptcut asks questions and shows results in the chat instead.
 - **Draft editing** covers text, captions, music, sound effects, main-track video clips and still images. Filters, transitions, effects, text templates, stickers and picture-in-picture must be added in the CapCut web editor for now.
-- **Caption tracks:** CapCut usually shows the first caption on a track of its own and the rest together on a second track. Drag the first caption onto the shared track in the editor if you want one track.
-- **Uploaded images** land loose in CapCut's Media panel; there's no way to put them in a folder.
 - **Captions for mixed-language videos** may miss short phrases in the second language. promptcut never fills gaps with its own translation; it tells you which parts have no captions.
-- **Draft names:** CapCut's draft tools can't set a name, and every save resets it: the desktop app shows "Untitled" and the web editor shows the date and time of the last save. Rename a draft only after Claude's last change.
-- **Open drafts on the web first:** use the web editor link before opening a draft in the desktop app. A draft opened only in the desktop app gets a numbered name such as "(4)", and closing it there can create a separate copy that won't get later changes.
-- **Emoji** in draft text may appear as plain monochrome symbols in CapCut's editor.
 - **Fonts:** promptcut sets a CapCut library font on text it adds, so it looks the same in the web editor and the desktop app. Text without a font, or with a local font saved by the desktop app, can wrap differently between the two.
 - **AI rough cuts** may use subscription credits and do not show a quote before starting.
 - **Slide decks:** PowerPoint exports show each slide as a picture, so the text can't be edited in PowerPoint (speaker notes are included). Decks use Google Fonts, which need an internet connection unless the fonts are installed.
