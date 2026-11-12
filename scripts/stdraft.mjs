@@ -16,6 +16,9 @@ import { pathToFileURL } from 'node:url'
 
 export const TEXT_LAYER_BASE = 1000
 export const AUDIO_LAYER_BASE = 100
+// Captions go on layer 1, the lowest text track above the main video, as in CapCut's own STDraft examples.
+// CapCut's conversion turns captions spread over higher layers into one track each.
+export const CAPTION_LAYER = 1
 
 const TEXT_STYLE = {
   alignment: 1,
@@ -61,6 +64,19 @@ function uniqueId(draft, prefix) {
 function nextLayer(draft, type, base) {
   const layers = draft.segments.filter(s => s.type === type).map(s => s.layout?.layer ?? base - 1)
   return Math.max(base - 1, ...layers) + 1
+}
+
+function overlaps(a, b) {
+  return a['start.ms'] < b['start.ms'] + b['duration.ms'] && b['start.ms'] < a['start.ms'] + a['duration.ms']
+}
+
+// The lowest layer from CAPTION_LAYER up where no existing TEXT segment overlaps the new cues in time.
+function captionLayer(draft, timelines) {
+  const texts = draft.segments.filter(s => s.type === 'TEXT' && s.timeline)
+  for (let layer = CAPTION_LAYER; ; layer++) {
+    const onLayer = texts.filter(s => (s.layout?.layer ?? -1) === layer)
+    if (!onLayer.some(s => timelines.some(t => overlaps(s.timeline, t)))) return layer
+  }
 }
 
 function requireMs(value, name, { min = 0 } = {}) {
@@ -144,10 +160,15 @@ const OPERATIONS = {
     return `Added text "${op.content}" (${id}) at ${op.start_ms} ms for ${op.duration_ms} ms`
   },
 
-  // {op, cues: [{start_ms, end_ms, text}], position_y?, font_size?, font?}
+  // {op, cues: [{start_ms, end_ms, text}], position_y?, font_size?, font?, layer?}
   add_captions(draft, op) {
     if (!Array.isArray(op.cues) || op.cues.length === 0) throw new Error('cues must be a non-empty array')
-    const layer = nextLayer(draft, 'TEXT', TEXT_LAYER_BASE)
+    const timelines = op.cues.map((cue, i) => {
+      const start = requireMs(cue.start_ms, `cue ${i + 1} start_ms`)
+      return { 'start.ms': start, 'duration.ms': requireMs(cue.end_ms, `cue ${i + 1} end_ms`, { min: start + 1 }) - start }
+    })
+    if (op.layer !== undefined && !(Number.isInteger(op.layer) && op.layer >= 1)) throw new Error('layer must be a whole number of at least 1')
+    const layer = op.layer ?? captionLayer(draft, timelines)
     const added = []
     for (const [i, cue] of op.cues.entries()) {
       const start = requireMs(cue.start_ms, `cue ${i + 1} start_ms`)
@@ -170,9 +191,9 @@ const OPERATIONS = {
     return `Added ${added.length} captions on layer ${layer}`
   },
 
-  // {op, source: "vid://..." | "vimo://...", start_ms?, duration_ms?, volume?, fade_in_ms?, fade_out_ms?, loop?}
+  // {op, source: "sid://..." (searched music) | "vid://..." | "vimo://..." | "tos://...", start_ms?, duration_ms?, volume?, fade_in_ms?, fade_out_ms?, loop?}
   add_audio(draft, op) {
-    const source = requireSource(op.source, ['vid', 'vimo'])
+    const source = requireSource(op.source, ['sid', 'vid', 'vimo', 'tos'])
     const start = requireMs(op.start_ms ?? 0, 'start_ms')
     const duration = requireMs(op.duration_ms ?? Math.max(1, draftDuration(draft) - start), 'duration_ms', { min: 1 })
     const id = uniqueId(draft, 'audio')
@@ -272,6 +293,27 @@ const OPERATIONS = {
     if (op.layer !== undefined) { s.layout.layer = op.layer; changed.push('layer') }
     if (changed.length === 0) throw new Error('place needs at least one field to change')
     return `Moved ${s.id}: ${changed.join(', ')}`
+  },
+
+  // {op, layer?}: packs every caption (TEXT segment whose id starts with "caption") back onto the lowest layers from
+  // `layer` (default 1): one layer when no captions overlap in time. Run before every save: CapCut's read-back spreads
+  // captions over extra layers, and saving those layers adds tracks.
+  reset_caption_layers(draft, op) {
+    const base = op.layer ?? CAPTION_LAYER
+    if (!(Number.isInteger(base) && base >= 1)) throw new Error('layer must be a whole number of at least 1')
+    const captions = draft.segments
+      .filter(s => s.type === 'TEXT' && s.timeline && typeof s.id === 'string' && s.id.startsWith('caption'))
+      .sort((a, b) => a.timeline['start.ms'] - b.timeline['start.ms'])
+    if (captions.length === 0) throw new Error('The draft has no captions (TEXT segments whose id starts with "caption")')
+    const placed = []
+    for (const s of captions) {
+      let layer = base
+      while (placed.some(p => p.layer === layer && overlaps(p.timeline, s.timeline))) layer++
+      s.layout = { ...(s.layout ?? {}), layer }
+      placed.push({ layer, timeline: s.timeline })
+    }
+    const used = [...new Set(placed.map(p => p.layer))].sort((a, b) => a - b)
+    return `Put ${captions.length} captions on layer${used.length > 1 ? 's' : ''} ${used.join(', ')}`
   },
 
   // {op, id}

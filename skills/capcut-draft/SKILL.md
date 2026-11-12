@@ -35,22 +35,27 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
    | op | Fields | Notes |
    | --- | --- | --- |
    | `add_text` | `content`, `start_ms`, `duration_ms`, optional `position_x`, `position_y` (-1 to 1), `font_size`, `font_color`, `font` | A title or label on its own layer |
-   | `add_captions` | `cues: [{start_ms, end_ms, text}]`, optional `position_y`, `font_size`, `font` | All cues on one new layer, near the bottom by default. Use the `capcut-captions` skill to get cues. |
-   | `add_audio` | `source`, optional `start_ms`, `duration_ms` (default: to the end), `volume`, `fade_in_ms`, `fade_out_ms`, `loop` | Music or sound effect. `source` is a `stdraft_uri` from `capcut-materials` (`vimo://...`) or an uploaded audio `vid` written as `vid://<vid>`. |
+   | `add_captions` | `cues: [{start_ms, end_ms, text}]`, optional `position_y`, `font_size`, `font`, `layer` | All cues on layer 1, the lowest text track (or the next layer up if captions there already overlap in time), near the bottom by default. Use the `capcut-captions` skill to get cues. |
+   | `add_audio` | `source`, optional `start_ms`, `duration_ms` (default: to the end), `volume`, `fade_in_ms`, `fade_out_ms`, `loop` | Music or sound effect. `source` is the `stdraft_uri` from `capcut-materials` exactly as returned (usually `sid://...`, sometimes `vimo://...`), or an uploaded audio `vid` written as `vid://<vid>`. |
    | `add_video` | `source` (`vid://<vid>`), `source_end_ms`, optional `source_start_ms`, `start_ms`, `volume` | Appends to the end of the main track unless `start_ms` is given |
    | `add_image` | `source` (an uploaded image's `uri`, written as `tos://<uri>`), `duration_ms`, optional `start_ms` | A still image on the main track, such as a slide or photo. Appends to the end of the main track unless `start_ms` is given. |
    | `update` | `id`, then any of `content`, `volume`, `font_size`, `font_color`, `font`, `fade_in_ms`, `fade_out_ms` | Changes a segment in place. Never add a new segment and call it an update. |
    | `place` | `id`, then any of `start_ms`, `duration_ms`, `position_x`, `position_y`, `layer` | Moves, trims or repositions a segment |
    | `remove` | `id` | Deletes a segment. Gaps it leaves are not closed. |
+   | `reset_caption_layers` | optional `layer` (default 1) | Puts all captions back on the lowest layers, one layer when they don't overlap in time. |
 
    **Always set `font` on text you add or restyle.** Without one, the CapCut web editor and desktop app each substitute their own default font, so the same text can wrap differently. `font` takes a font's `vimo://<id>` `stdraft_uri` from `capcut-materials`. Unless the user named a font, search fonts once per conversation (`search_capcut_material` with `type: "font"`, `top_n: 20`), pick a clean, legible sans-serif from the descriptions, tell the user which one you chose, and reuse it for all new text.
+
+   **Keep captions on as few tracks as possible.** CapCut's read-back spreads captions over extra layers, and saving those layers as they are adds a track each time. Whenever the draft has captions, end every operation list with `{"op": "reset_caption_layers"}`, including saves that only change something else. Even so, CapCut usually shows the first caption on a track of its own and the rest together on a second track. Tell the user they can drag the first caption onto the shared track in the editor if they want one track.
 
 2. **Apply locally:** `node "${CLAUDE_PLUGIN_ROOT}/scripts/stdraft.mjs" apply --in <tmp>/draft.json --ops <tmp>/ops.json --out <tmp>/draft-new.json`. On an error, fix the operations and run again. Nothing is written until every operation succeeds and the result validates. Run `summary` on the result and check it matches the request.
 3. **Check the version, right before saving:** call `check_stdraft_state` with the `session_id` and your current `package_id` (empty for a new draft). This also shows an "editing" overlay in the web editor for up to 20 minutes, so only call it when you are about to save. If `stale` is true, the user changed the draft in the browser: call `get_stdraft_snapshot`, apply the same operations to that newer document, and tell the user you built on their latest changes.
 4. **Save:** call `push_stdraft_snapshot` with `session_id`, `base_package_id` (the version you edited, or empty for a new draft) and `stdraft_json` (the new document as a string).
 5. **After a successful save:** keep the returned `server_package_id` as the new version. If `stdraft_json` is returned, save it as the new baseline document, otherwise call `get_stdraft_snapshot`. Tell the user what changed, in plain words, and give them `web_editor_url` with its `web_editor_text` label so they can review and export in the CapCut web editor. Saving a draft does not export a new video file.
 
-   After the first save of a new draft, also tell the user that the draft appears as "Untitled" in their CapCut apps, because CapCut's draft tools can't set a name, and that they can rename it in any CapCut app. Say this once per draft.
+   After the first save of a new draft, also tell the user, once per draft:
+   - **Names:** CapCut's draft tools can't set a name, and every save resets it. The CapCut desktop app shows "Untitled" and the web editor shows the date and time of the last save (such as 202611111913). A name the user gives the draft is lost at the next save, so they should rename it only after the last change.
+   - **Open it on the web first:** open the draft with the web editor link before opening it in the desktop app. Opened only in the desktop app, it gets a numbered name such as "(4)", and closing it there can create a separate copy. Those copies don't receive later saves; check before deleting any.
 
 ## Save errors
 
@@ -58,6 +63,7 @@ Save the document as UTF-8 JSON in a temporary folder, for example `<tmp>/draft.
 | --- | --- |
 | `STDRAFT_INVALID` | Nothing was saved. Read the validation details, fix the operations or document, and try once more. If it fails again, report the details to the user. |
 | `STDRAFT_VERSION_CONFLICT` | Nothing was saved, because the draft changed in the browser. Get the latest snapshot, re-apply the operations, check the summary, then save again with the new `package_id`. |
+| `save cloud draft failed` with `ret=2005` | The draft was deleted in CapCut, so this session can't save to it. Tell the user, call `start_stdraft_session` for a new draft, and save the current document with an empty `base_package_id`. |
 | Unsure whether a save went through | Call `check_stdraft_state` or `get_stdraft_snapshot` first. Never repeat a save blindly. |
 | Login error (for example `check login error` or `get user workspace failed`) | Stop and follow the `capcut-connect` skill. Do not retry or try other tools first. |
 

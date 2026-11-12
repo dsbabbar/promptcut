@@ -5,7 +5,7 @@
 //   node slides.mjs new    --out <deck.html> --title "<title>" [--ratio 16:9|4:3] [--lang en]
 //   node slides.mjs check  --file <deck.html> [--render] [--fix-runtime]
 //   node slides.mjs export --file <deck.html> --format png|pdf|pptx|sheet [--out <path>] [--scale 2|video]
-//   node slides.mjs video-plan --file <deck.html> --uploads <upload-results.json> --out <ops.json> [--seconds 4] [--notes-as-captions [--font vimo://<id>]]
+//   node slides.mjs video-plan --file <deck.html> --uploads <upload-results.json> --out <ops.json> [--seconds 4] [--notes-as-captions | --captions <captions.json>] [--font vimo://<id>]
 //   node slides.mjs open   --file <deck.html>
 //
 // Prints one JSON object. Rendering (check --render, export) needs Google Chrome, Microsoft Edge, Chromium or
@@ -29,7 +29,7 @@ const BROWSER_TIMEOUT_MS = 90_000
 // ---------- arguments ----------
 
 const FLAGS = new Set(['--render', '--fix-runtime', '--notes-as-captions', '--help', '-h'])
-const OPTIONS = new Set(['--out', '--file', '--title', '--ratio', '--lang', '--format', '--scale', '--uploads', '--seconds', '--font'])
+const OPTIONS = new Set(['--out', '--file', '--title', '--ratio', '--lang', '--format', '--scale', '--uploads', '--seconds', '--font', '--captions'])
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv
@@ -610,8 +610,17 @@ export function slideUploads(uploads, count) {
   return bySlide
 }
 
-export function videoPlan({ slides, ratio, uploads, seconds = 4, notesAsCaptions = false, font = null }) {
+// Captions sit a little above the bottom edge in a smaller size, so they don't cover slide content.
+const SLIDE_CAPTION_STYLE = { position_y: -0.75, font_size: 5 }
+
+export function videoPlan({ slides, ratio, uploads, seconds = 4, notesAsCaptions = false, captions = null, font = null }) {
   if (font !== null && !/^vimo:\/\/\d+$/.test(font)) throw new Error('--font must be a CapCut font stdraft_uri such as vimo://123')
+  if (captions !== null) {
+    if (!Array.isArray(captions) || captions.length !== slides.length) throw new Error(`--captions must be a JSON array with one entry per slide (${slides.length})`)
+    for (const [i, text] of captions.entries()) {
+      if (text !== null && typeof text !== 'string') throw new Error(`--captions entry ${i + 1} must be text or null`)
+    }
+  }
   if (!(seconds >= 0.5 && seconds <= 600)) throw new Error('--seconds must be from 0.5 to 600')
   const [w, h] = RATIOS[ratio]
   const width = Math.round((w * VIDEO_HEIGHT) / h)
@@ -623,10 +632,11 @@ export function videoPlan({ slides, ratio, uploads, seconds = 4, notesAsCaptions
     const duration = Math.round((slide.seconds ?? seconds) * 1000)
     const uri = bySlide.get(slide.num)
     operations.push({ op: 'add_image', source: uri.includes('://') ? uri : `tos://${uri.replace(/^\/+/, '')}`, start_ms: at, duration_ms: duration })
-    if (notesAsCaptions && slide.notes) cues.push({ start_ms: at, end_ms: at + duration, text: slide.notes.replace(/\s+/g, ' ').trim() })
+    const text = captions !== null ? (captions[slide.num - 1] || '') : notesAsCaptions ? slide.notes : ''
+    if (text && text.trim()) cues.push({ start_ms: at, end_ms: at + duration, text: text.replace(/\s+/g, ' ').trim() })
     at += duration
   }
-  if (cues.length) operations.push(font ? { op: 'add_captions', cues, font } : { op: 'add_captions', cues })
+  if (cues.length) operations.push({ op: 'add_captions', cues, ...SLIDE_CAPTION_STYLE, ...(font ? { font } : {}) })
   return { width, height: VIDEO_HEIGHT, totalMs: at, operations }
 }
 
@@ -643,6 +653,7 @@ function cmdVideoPlan(args) {
     uploads,
     seconds: args.seconds === undefined ? 4 : Number(args.seconds),
     notesAsCaptions: Boolean(args.notesAsCaptions),
+    captions: args.captions ? JSON.parse(fs.readFileSync(path.resolve(args.captions), 'utf8')) : null,
     font: args.font ?? null,
   })
   const out = path.resolve(args.out)
@@ -675,7 +686,7 @@ const HELP = `Usage:
   node slides.mjs new    --out <deck.html> --title "<title>" [--ratio 16:9|4:3] [--lang en]
   node slides.mjs check  --file <deck.html> [--render] [--fix-runtime]
   node slides.mjs export --file <deck.html> --format png|pdf|pptx|sheet [--out <path>] [--scale 2|video]
-  node slides.mjs video-plan --file <deck.html> --uploads <upload-results.json> --out <ops.json> [--seconds 4] [--notes-as-captions [--font vimo://<id>]]
+  node slides.mjs video-plan --file <deck.html> --uploads <upload-results.json> --out <ops.json> [--seconds 4] [--notes-as-captions | --captions <captions.json>] [--font vimo://<id>]
   node slides.mjs open   --file <deck.html>`
 
 export async function main(argv) {

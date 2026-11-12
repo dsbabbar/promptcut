@@ -60,13 +60,35 @@ test('adds text, captions and music on new layers without touching the input', (
   assert.equal(text.attributes.font, 'vimo://456'.replace('456', '123'))
   const captions = draft.segments.filter(s => s.id.startsWith('caption_'))
   assert.equal(captions.length, 2)
-  assert.ok(captions.every(c => c.layout.layer === 1002))
+  assert.ok(captions.every(c => c.layout.layer === 1), 'captions go on layer 1')
   assert.deepEqual(captions[1].timeline, { 'start.ms': 1300, 'duration.ms': 1200 })
   const audio = draft.segments.find(s => s.id === 'audio_0')
   assert.equal(audio.layout.layer, 101)
   assert.equal(audio.timeline['duration.ms'], 5000)
   assert.equal(audio.attributes['fade_out.ms'], 1000)
   assert.deepEqual(validate(draft), [])
+})
+
+test('accepts searched music (sid://) and keeps captions on one low layer', () => {
+  const { draft } = applyOperations(sampleDraft(), [
+    { op: 'add_audio', source: 'sid://789' },
+    { op: 'add_captions', cues: [{ start_ms: 0, end_ms: 1000, text: 'English' }] },
+    { op: 'add_captions', cues: [{ start_ms: 0, end_ms: 1000, text: 'Second language' }] },
+    { op: 'add_captions', cues: [{ start_ms: 2000, end_ms: 3000, text: 'Later' }] },
+  ])
+  assert.equal(draft.segments.find(s => s.attributes?.source === 'sid://789').type, 'AUDIO')
+  const layerOf = text => draft.segments.find(s => s.attributes?.content === text).layout.layer
+  assert.equal(layerOf('English'), 1)
+  assert.equal(layerOf('Second language'), 2, 'overlapping captions move up one layer')
+  assert.equal(layerOf('Later'), 1, 'non-overlapping captions share layer 1')
+  // CapCut's read-back spreads captions over layers; reset puts them back on one.
+  for (const s of draft.segments) if (s.id.startsWith('caption_')) s.layout.layer += 5
+  const { draft: reset, changes } = applyOperations(draft, [{ op: 'reset_caption_layers' }])
+  assert.match(changes[0], /Put 3 captions on layers 1, 2/)
+  assert.equal(reset.segments.find(s => s.attributes?.content === 'Later').layout.layer, 1)
+  assert.equal(reset.segments.find(s => s.attributes?.content === 'Second language').layout.layer, 2)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'reset_caption_layers' }]), /no captions/)
+  assert.throws(() => applyOperations(sampleDraft(), [{ op: 'add_captions', layer: 0, cues: [{ start_ms: 0, end_ms: 1, text: 'x' }] }]), /layer must be/)
 })
 
 test('appends video, updates, moves and removes segments', () => {

@@ -54,7 +54,7 @@ Use a short lowercase-hyphenated `<subject>`. Never overwrite another deck. For 
 ## 4. Check before showing
 
 1. `S check --file <deck> --render`. Fix every `errors` item. Treat each `render.problems` line as a pointer to look at: text past the slide edge or cut off is almost always a real bug, and overlapping text usually is. `loadTimedOut` or a font in `fonts.failed` means the fonts or images didn't load in time, often because the computer is offline.
-2. `S export --file <deck> --format sheet` writes contact sheets with four slides per image to a temporary folder. Open each sheet in turn and look for broken layouts, unreadable text, weak hierarchy, empty-looking slides and images that don't fit. Open a single slide (`--format png`) only when a sheet leaves you unsure.
+3. `S export --file <deck> --format sheet` writes contact sheets with four slides per image to a temporary folder. Open each sheet in turn and look for broken layouts, unreadable text, weak hierarchy, empty-looking slides and images that don't fit. Open a single slide (`--format png`) only when a sheet leaves you unsure.
 3. Check the facts against your source list, and check the slide count, ratio and language against the brief.
 
 Fix what you find and check again. If a check can't run (for example, no browser was found), say that the deck is unchecked.
@@ -90,15 +90,22 @@ Only when the user asks for a video or slideshow. This makes a CapCut cloud draf
 
 Before the first CapCut account step in this conversation, check the sign-in with `capcut_get_profile` as the `capcut-connect` skill describes.
 
-1. Ask, in one question, how long each slide should show (default 4 seconds, or `data-seconds` per slide), whether they want background music, and whether to show the speaker notes as captions. Captions work best when the notes are short sentences.
-2. `S export --file <deck> --format png --scale video --out <tmp>/video-slides` renders 1080-pixel-tall slides (1920 x 1080 for 16:9).
-3. Upload every PNG in one batch with the `capcut-upload` skill. Save the upload script's JSON output to `<tmp>/uploads.json`.
-4. If captions were requested, pick a font as the `capcut-draft` skill describes. Then run:
-   `S video-plan --file <deck> --uploads <tmp>/uploads.json --out <tmp>/ops.json [--seconds 4] [--notes-as-captions --font vimo://<id>]`
-   This writes `add_image` operations (and `add_captions`) for the draft. Its `width` and `height` give the draft size.
-5. For music, find a track with the `capcut-materials` skill and add an `add_audio` operation with `fade_out_ms: 1500` to the end of `ops.json`.
-6. Follow the `capcut-draft` skill from "Get the starting document". Create the document with `node "${CLAUDE_PLUGIN_ROOT}/scripts/stdraft.mjs" new --width <width> --height <height>`, apply `ops.json`, call `start_stdraft_session`, then save with an empty `base_package_id`.
-7. Give the user the web editor link. Tell them to add transitions there if they want them, export the video from the editor, and that the draft shows as "Untitled" in their CapCut apps.
+1. Ask how long each slide should show (default 4 seconds, or `data-seconds` per slide) and whether they want background music.
+2. **Always ask about captions, every time you make a slideshow video**, as its own multiple-choice question, even if the notes look short or a previous video used captions. Skip it only when the user already chose in this same request. Offer exactly these options:
+   - **Yes, shortened:** one short line per slide, written from that slide's speaker notes. Leave out text meant only for the presenter, such as reminders or asides.
+   - **Yes, word for word:** each slide's full speaker notes as they are.
+   - **No captions:** just the slides.
+   Both caption options use a smaller size, placed a little above the bottom edge so they don't cover the slide. If the deck has no speaker notes, say so and offer only "No captions" or captions the user writes.
+   For **shortened** captions, write the lines, show them to the user as a numbered list (one per slide, or "none"), and wait for their OK before building the draft. Save them as a JSON array with one entry per slide, a string or `null`, to `<tmp>/captions.json`.
+3. `S export --file <deck> --format png --scale video --out <tmp>/video-slides` renders 1080-pixel-tall slides (1920 x 1080 for 16:9).
+4. Upload every PNG in one batch with the `capcut-upload` skill. Save the upload script's JSON output to `<tmp>/uploads.json`.
+5. If the user chose captions, pick a font as the `capcut-draft` skill describes. Then run:
+   `S video-plan --file <deck> --uploads <tmp>/uploads.json --out <tmp>/ops.json [--seconds 4] [--notes-as-captions | --captions <tmp>/captions.json] [--font vimo://<id>]`
+   Use `--notes-as-captions` for word for word and `--captions` for shortened. This writes `add_image` operations (and `add_captions`) for the draft. Its `width` and `height` give the draft size.
+   For slides that didn't come from a promptcut deck (for example images or a PDF the user exported from another app), write the same operations by hand: one `add_image` per slide, then one `add_captions` with `position_y: -0.7` and `font_size: 10`.
+6. For music, find a track with the `capcut-materials` skill and add an `add_audio` operation with `fade_out_ms: 1500` to the end of `ops.json`.
+7. Follow the `capcut-draft` skill from "Get the starting document". Create the document with `node "${CLAUDE_PLUGIN_ROOT}/scripts/stdraft.mjs" new --width <width> --height <height>`, apply `ops.json`, call `start_stdraft_session`, then save with an empty `base_package_id`.
+8. Give the user the web editor link. Tell them to add transitions there if they want them and export the video from the editor, and give them the draft name and copy notes from the `capcut-draft` skill's "After a successful save" step.
 
 If the save fails with `STDRAFT_INVALID` on the image clips, report the validation details to the user. Don't fall back to other tools.
 
