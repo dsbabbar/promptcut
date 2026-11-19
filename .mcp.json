@@ -3,10 +3,6 @@
     "capcut": {
       "type": "http",
       "url": "https://www.capcut.com/api/external_mcp"
-    },
-    "capcut-cards": {
-      "type": "http",
-      "url": "https://www.capcut.com/api/external_mcp/resource"
     }
   }
 }

@@ -60,7 +60,7 @@ Or install it yourself, from either app:
 - **Claude desktop app:** type `/plugin` in a Code session (or open **Settings → Plugins**), click **+ Add → Add marketplace → Add from a repository**, enter `dsbabbar/promptcut` and click **Sync**. Then on **Discover**, open the arrow next to **Add** on **Promptcut** and choose **Install for me**.
 - **Terminal:** run `claude plugin install promptcut --marketplace dsbabbar/promptcut`. Inside a terminal session, type `/plugin install promptcut --marketplace dsbabbar/promptcut` and choose **Install for you (user scope)**.
 
-Then sign in to CapCut once. In the desktop app, type `/mcp`, search for **promptcut**, open its **Connectors** tab, and connect **capcut** (sign in in the browser, then click **Done**) and **capcut-cards**. In a terminal session, type `/mcp`, select **capcut** and choose **Authenticate**. Both apps share the install, so promptcut is available in every new local session, in the terminal and in the desktop app's **Code** tab with **Local → This computer**.
+Then sign in to CapCut once. In the desktop app, type `/mcp`, search for **promptcut**, open its **Connectors** tab, and connect **capcut** (sign in in the browser, then click **Done**). In a terminal session, type `/mcp`, select **capcut** and choose **Authenticate**. Both apps share the install, so promptcut is available in every new local session, in the terminal and in the desktop app's **Code** tab with **Local → This computer**.
 
 ### Can I use it on claude.ai or in a cloud session?
 
@@ -114,7 +114,7 @@ promptcut checks your sign-in with CapCut before longer jobs (generation, rough 
 
 ### Every CapCut tool appears twice
 
-You also added CapCut's servers by hand. Remove the manual copies with `claude mcp remove capcut` and `claude mcp remove capcut-cards`.
+You also added CapCut's servers by hand. Remove the manual copies with `claude mcp remove capcut` and, if present, `claude mcp remove capcut-cards`.
 
 ### Why does Claude Code ask permission before uploading?
 

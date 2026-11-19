@@ -49,14 +49,13 @@ The servers are reached at `www.capcut.com` through a global content delivery ne
 
 Anything you upload or generate is stored by CapCut under its [Privacy Policy](https://www.capcut.com/clause/privacy), possibly outside your country. If footage must stay on your computer, see local project mode in [Choosing a workflow](choosing-a-workflow.md).
 
-## The two CapCut servers
+## The CapCut server
 
 | Server | Address | Login | What it provides |
 | --- | --- | --- | --- |
-| `capcut` | `https://www.capcut.com/api/external_mcp` | Your CapCut account (OAuth) | Search, generation, captions, rough cuts, upload permission, draft sessions |
-| `capcut-cards` | `https://www.capcut.com/api/external_mcp/resource` | None | Display helpers such as template galleries |
+| `capcut` | `https://www.capcut.com/api/external_mcp` | Your CapCut account (OAuth) | Search, generation, captions, rough cuts, upload permission, draft sessions, and display helpers such as template galleries and video previews |
 
-CapCut built these servers for AI assistants. The official CapCut x Codex plugin connects to the same servers. promptcut uses them from Claude Code with its own skills and scripts.
+CapCut built this server for AI assistants. The official CapCut x Codex plugin (v31 and later) connects to the same single server. Earlier promptcut versions also connected to a separate `capcut-cards` server at `/external_mcp/resource`; its tools are all on `capcut` too, so 0.4.2 dropped it. promptcut uses them from Claude Code with its own skills and scripts.
 
 ## The skills
 
