@@ -5,14 +5,13 @@ description: Connect Claude Code to a CapCut account, check that Node.js and ffm
 
 # Connect to CapCut
 
-promptcut uses two MCP servers hosted by CapCut:
+promptcut uses one MCP server hosted by CapCut:
 
 | Server | Purpose | Login |
 | --- | --- | --- |
-| `capcut` | Account tools: search, generation, captions, rough cuts, uploads, drafts | OAuth with the user's CapCut account |
-| `capcut-cards` | Display helpers such as template galleries | None |
+| `capcut` | Account tools (search, generation, captions, rough cuts, uploads, drafts) and display helpers such as `templates_preview` and `video_preview` | OAuth with the user's CapCut account |
 
-Tools appear in Claude Code as `mcp__plugin_promptcut_capcut__<tool>` and `mcp__plugin_promptcut_capcut-cards__<tool>`. Match tools by the part after the last `__` so the workflow also works when a user added the servers by hand (for example `mcp__capcut__<tool>`).
+Tools appear in Claude Code as `mcp__plugin_promptcut_capcut__<tool>`. Match tools by the part after the last `__` so the workflow also works when a user added the server by hand (for example `mcp__capcut__<tool>`). If an older install still shows a `capcut-cards` server, its tools are duplicates of tools on `capcut`: use the `capcut` ones.
 
 ## Setup check
 
@@ -66,7 +65,7 @@ On the first login error:
 
 Claude cannot complete the login itself. Tell the user to:
 
-- **Claude desktop app:** type `/mcp` (it opens **Settings → Connectors**), search for **promptcut**, open its **Connectors** tab, click **capcut** and connect it. Approve opening www.capcut.com, sign in in the browser, then click **Done**. Also add **capcut-cards**, which needs no sign-in. Then start a new session.
+- **Claude desktop app:** type `/mcp` (it opens **Settings → Connectors**), search for **promptcut**, open its **Connectors** tab, click **capcut** and connect it. Approve opening www.capcut.com, sign in in the browser, then click **Done**. Then start a new session.
 - **Terminal:** run `/mcp`, select **capcut** (it may show as `plugin:promptcut:capcut`) and choose **Authenticate**. Sign in to CapCut in the browser window that opens, then return to Claude Code.
 
 ## Switch to a different CapCut account
@@ -90,7 +89,7 @@ The login only works when Claude Code runs on the user's own computer. CapCut ac
 | `unknown client` or `invalid_request` on the login page | Region mismatch. A US internet connection needs a US-registered CapCut account and a non-US connection needs a non-US account. Sign out at capcut.com, sign in with a matching account, then authenticate again. |
 | Browser shows "connection refused" on a `localhost` page | The login wait expired or a firewall blocked the local callback. Run **Authenticate** again and allow the local connection if the firewall asks. |
 | HTTP 502 or Bad Gateway with no tool result | CapCut's service is temporarily down. Wait and retry later. Do not log out. |
-| Each CapCut tool is listed twice | The servers were also added by hand. Remove the manual copies with `claude mcp remove capcut` and `claude mcp remove capcut-cards`. |
+| Each CapCut tool is listed twice | The server was also added by hand, or an older `capcut-cards` server is still configured. Remove the manual copies with `claude mcp remove capcut` and `claude mcp remove capcut-cards`. |
 | A CapCut tool says `check login error`, `get user workspace failed`, not logged in or unauthorized | The CapCut sign-in has expired. Follow [Stop at the first login error](#stop-at-the-first-login-error). |
 | Tools still missing after login | Start a new session. In a terminal, you can also run `/mcp` and choose **Reconnect** for capcut. |
 

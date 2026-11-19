@@ -15,8 +15,7 @@ promptcut is a **Claude Code plugin**: one installable package. CapCut runs a ho
 See [What's inside promptcut](docs/whats-inside.md) for how the pieces fit together.
 
 ```
-Claude Code ── promptcut plugin ──┬── capcut        (your CapCut account, OAuth login)
-                                  └── capcut-cards  (result cards, no login)
+Claude Code ── promptcut plugin ──── capcut  (your CapCut account, OAuth login)
 ```
 
 All AI generation, search and editing run on CapCut's servers under **your own CapCut account**. promptcut does not run its own backend and never sees your password.
@@ -56,7 +55,7 @@ Approve the command when Claude asks. Then start a new session and sign in to Ca
 
    If your terminal doesn't recognize `claude`, [install Claude Code](https://code.claude.com) first. Already in a Claude Code session in the terminal? Type `/plugin install promptcut --marketplace dsbabbar/promptcut` instead, confirm adding the marketplace if asked, and choose **Install for you (user scope)**. "Components will be discovered at installation" is normal. If asked, run `/reload-plugins`.
 2. **Sign in to CapCut** once. The sign-in is shared by both apps.
-   - **Claude desktop app:** type `/mcp` in a Code session (or open **Settings → Connectors**) and search for **promptcut**, not "capcut". Open **Promptcut**, go to its **Connectors** tab, click **capcut** and connect it. Approve opening www.capcut.com, sign in in your browser, then click **Done**. Then add **capcut-cards**, which needs no sign-in.
+   - **Claude desktop app:** type `/mcp` in a Code session (or open **Settings → Connectors**) and search for **promptcut**, not "capcut". Open **Promptcut**, go to its **Connectors** tab, click **capcut** and connect it. Approve opening www.capcut.com, sign in in your browser, then click **Done**.
    - **Terminal:** in a `claude` session, type `/mcp`, select **capcut** (it may show as `plugin:promptcut:capcut`), and choose **Authenticate**. Sign in to CapCut in the browser window that opens.
 3. **Start a new session** and ask for what you want:
    - **Terminal:** run `claude` in the folder where you'll work.
@@ -68,7 +67,7 @@ Always use promptcut in a local session. Cloud sessions and the claude.ai websit
 
 Uploading local files uses CapCut's `capcut_asset_upload_credential` tool, which issues short-lived upload credentials. Claude Code asks before running it. Approve it when asked, or allow it permanently with `/permissions`.
 
-If you previously added CapCut's servers by hand, remove them so each tool is listed once: `claude mcp remove capcut` and `claude mcp remove capcut-cards`.
+If you previously added CapCut's servers by hand, remove them so each tool is listed once: `claude mcp remove capcut`. Since 0.4.2 promptcut no longer uses a separate `capcut-cards` server, so if you added that one by hand you can remove it too: `claude mcp remove capcut-cards`.
 
 Questions? See the [FAQ](docs/faq.md) and [Known issues](docs/known-issues.md). Not sure whether promptcut or editing CapCut's local project files fits your project better? See [Choosing a workflow](docs/choosing-a-workflow.md).
 

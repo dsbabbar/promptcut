@@ -22,7 +22,7 @@ Reuse the session the user is clearly continuing. If several could apply, ask wh
 ## Get the starting document
 
 - **Draft session already in use:** use the document and `package_id` from your last save. If you have none, call `get_stdraft_snapshot` with the `session_id`.
-- **Fresh rough cut:** call `video_preview` (on `capcut-cards`) with the rough-cut event's `context` and `resources` unchanged. Its output includes the finished draft as an STDraft string. Then call `start_stdraft_session`. The first save, with an empty `base_package_id`, turns the rough cut into an editable cloud draft.
+- **Fresh rough cut:** call `video_preview` (on `capcut`) with the rough-cut event's `context` and `resources` unchanged. Its output includes the finished draft as an STDraft string. Then call `start_stdraft_session`. The first save, with an empty `base_package_id`, turns the rough cut into an editable cloud draft.
 - **An uploaded video with no draft:** get its width, height and duration from `capcut_batch_media_url` (`vids`). Phone videos are often stored landscape with a rotation flag, so for a local file also check with `ffprobe` when available, and swap width and height when it is rotated 90 or 270 degrees. Ask the user if the shape is still unclear. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/stdraft.mjs" new --width <w> --height <h> --out <tmp>/draft.json`, then include an `add_video` operation for the clip (`source_end_ms` = its duration) in the first edit round, and call `start_stdraft_session`. The first save, with an empty `base_package_id`, creates the draft.
 - **Nothing to start from:** ask the user what to build on, such as a rough cut or uploaded clips.
 
