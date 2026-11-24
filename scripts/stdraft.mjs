@@ -80,6 +80,14 @@ function find(draft, id) {
   return segment
 }
 
+// An id the operation asked for (letters, digits, _ and -, not already used), or a new one with the prefix.
+function chooseId(draft, wanted, prefix) {
+  if (wanted === undefined) return uniqueId(draft, prefix)
+  if (typeof wanted !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(wanted)) throw new Error('id must be 1 to 64 letters, digits, _ or -')
+  if (draft.segments.some(s => s.id === wanted)) throw new Error(`id "${wanted}" is already used in the draft`)
+  return wanted
+}
+
 function uniqueId(draft, prefix) {
   const ids = new Set(draft.segments.map(s => s.id))
   for (let n = 0; ; n++) {
@@ -786,7 +794,7 @@ const OPERATIONS = {
     const from = requireMs(op.source_start_ms ?? 0, 'source_start_ms')
     const to = requireMs(op.source_end_ms, 'source_end_ms', { min: from + 1 })
     const { start, layout } = visualPlacement(draft, op, to - from)
-    const id = uniqueId(draft, 'video')
+    const id = chooseId(draft, op.id, 'video')
     const s = {
       id,
       type: 'VIDEO',
@@ -810,7 +818,7 @@ const OPERATIONS = {
     const source = requireSource(raw.includes('://') ? raw : `tos://${raw.replace(/^\/+/, '')}`, ['tos', 'vid', 'asset'])
     const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
     const { start, layout } = visualPlacement(draft, op, duration)
-    const id = uniqueId(draft, 'image')
+    const id = chooseId(draft, op.id, 'image')
     const s = {
       id,
       type: 'VIDEO',
