@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  CREDENTIAL_URL, FINALIZE_URL, crc32Hex, deriveSigningKey, describeFiles, exchangeTicket, mediaKind, signRequest, uploadAll,
+  CREDENTIAL_URL, FINALIZE_URL, crc32Hex, proxySupported, trustedFinalizeUrl, deriveSigningKey, describeFiles, exchangeTicket, mediaKind, signRequest, uploadAll,
 } from '../scripts/capcut-upload.mjs'
 
 const TICKET = 'AbCdEfGhIjKlMnOpQrStUw'
@@ -154,4 +154,36 @@ test('refuses untrusted control hosts and finalize urls', async () => {
   const r2 = await uploadAll(TICKET, [video], { fetchImpl: badFinalize.fetchImpl })
   assert.match(r2.results[0].error, /trusted finalize/)
   assert.ok(badFinalize.calls.every(c => !c.host.includes('evil')))
+})
+
+test('finalize goes only to CapCut, including its US address', () => {
+  assert.equal(trustedFinalizeUrl(FINALIZE_URL), FINALIZE_URL)
+  assert.equal(trustedFinalizeUrl('https://www.capcutw.us/api/external_mcp/upload/finalize'), 'https://www.capcutw.us/api/external_mcp/upload/finalize')
+  assert.equal(trustedFinalizeUrl('https://capcut.com.evil.example/api/external_mcp/upload/finalize'), null)
+  assert.equal(trustedFinalizeUrl('http://www.capcut.com/api/external_mcp/upload/finalize'), null)
+  assert.equal(trustedFinalizeUrl('https://www.capcutw.us/other'), null)
+  assert.equal(trustedFinalizeUrl('https://user:pw@www.capcut.com/api/external_mcp/upload/finalize'), null)
+  assert.equal(trustedFinalizeUrl(undefined), null)
+})
+
+test('a video whose session finalizes on the US address is finalized there', async () => {
+  const us = 'https://www.capcutw.us/api/external_mcp/upload/finalize'
+  const { fetchImpl, calls } = fakeCapCut(fakeSession({ vod_finalize: { url: us, token: 'finalize-token', expires_at: 0 } }))
+  const wrapped = async (url, options) => (url === us ? new Response(JSON.stringify({ status: 'success', vid: 'v-123' }), { status: 200 }) : fetchImpl(url, options))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-'))
+  const file = path.join(dir, 'clip.mp4')
+  fs.writeFileSync(file, Buffer.alloc(10))
+  const result = await uploadAll('mcp_ut_useast5_abcdefghijklmnopqrstuA', [file], { fetchImpl: wrapped })
+  assert.equal(result.success, true)
+  assert.equal(result.results[0].public, true)
+  assert.ok(!calls.some(c => c.action === '/api/external_mcp/upload/finalize' && c.host === 'www.capcut.com'))
+})
+
+test('proxy support needs Node 22.21+ or 24.5+', () => {
+  assert.equal(proxySupported('22.21.0'), true)
+  assert.equal(proxySupported('22.20.1'), false)
+  assert.equal(proxySupported('24.4.0'), false)
+  assert.equal(proxySupported('24.5.0'), true)
+  assert.equal(proxySupported('25.0.0'), true)
+  assert.equal(proxySupported('20.18.0'), false)
 })

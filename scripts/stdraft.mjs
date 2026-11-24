@@ -545,11 +545,21 @@ function speedableVideo(draft, id) {
   return s
 }
 
-// Sets a clip's timeline length from its source range and speed. On the main track, later clips move with it.
+// How much source a clip plays in `duration` ms of project time, the way CapCut's draft tools work it out: playback
+// times speed, rounded to the nearest millisecond, or rounded down for a speed curve, so a ramp never reaches one
+// frame past the cut.
+export function sourceLength(segment, duration) {
+  const length = duration * speedOf(segment)
+  return typeof segment.attributes?.curve_speed === 'string' ? Math.floor(Math.round(length * 1e6) / 1e6) : Math.round(length)
+}
+
+// Sets a clip's timeline length from its source range and speed, then the source end from that length, so the two
+// agree as CapCut computes them. On the main track, later clips move with it.
 function retime(draft, s) {
   const a = s.attributes
   const oldEnd = s.timeline['start.ms'] + s.timeline['duration.ms']
   const duration = Math.max(1, Math.round((a['end.ms'] - a['start.ms']) / speedOf(s)))
+  a['end.ms'] = a['start.ms'] + Math.max(1, sourceLength(s, duration))
   const delta = duration - s.timeline['duration.ms']
   s.timeline['duration.ms'] = duration
   delete s.timeline['end.ms'] // CapCut's read-back adds end.ms; duration.ms wins, so drop the stale value
@@ -889,7 +899,7 @@ const OPERATIONS = {
     if (op.duration_ms !== undefined) {
       const duration = requireMs(op.duration_ms, 'duration_ms', { min: 1 })
       const isPhoto = s.attributes?.meta_type === 'photo'
-      if (s.type === 'VIDEO' && !isPhoto && 'start.ms' in (s.attributes ?? {})) s.attributes['end.ms'] = s.attributes['start.ms'] + Math.round(duration * speedOf(s))
+      if (s.type === 'VIDEO' && !isPhoto && 'start.ms' in (s.attributes ?? {})) s.attributes['end.ms'] = s.attributes['start.ms'] + Math.max(1, sourceLength(s, duration))
       // Word timings must stay inside the caption. One whole-sentence entry stretches to the new length.
       const key = timelineKey(s)
       const words = s.attributes?.[key]

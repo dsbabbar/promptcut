@@ -12,6 +12,8 @@ promptcut uses two MCP servers hosted by CapCut:
 | `capcut` | Account tools: search, generation, captions, rough cuts, uploads, drafts | OAuth with the user's CapCut account |
 | `capcut-cards` | Display helpers such as template galleries | None |
 
+CapCut's own plugin now serves everything, display helpers included, from the single `capcut` server, so a tool may be on either one. Look up tools by name on both. Public display tools working doesn't prove the account is signed in.
+
 Tools appear in Claude Code as `mcp__plugin_promptcut_capcut__<tool>` and `mcp__plugin_promptcut_capcut-cards__<tool>`. Match tools by the part after the last `__` so the workflow also works when a user added the servers by hand (for example `mcp__capcut__<tool>`).
 
 ## Setup check

@@ -13,6 +13,7 @@
 //
 // Credentials stay in this process. They are never printed, logged or written to disk.
 
+import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -26,6 +27,20 @@ const PART_SIZE = 8 * 1024 * 1024
 const MAX_MEDIA_BYTES = 1024 ** 3
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const TRUSTED_CONTROL_HOSTS = /(^|\.)(tiktok\.com|tiktokw\.us|volcengineapi\.com)$/i
+const FINALIZE_PATH = '/api/external_mcp/upload/finalize'
+
+// The finalize step must go to CapCut itself: www.capcut.com (or another capcut.com host), or www.capcutw.us, which
+// CapCut uses for US accounts. Returns the URL to post to, or null when the session's URL isn't one of these.
+export function trustedFinalizeUrl(value) {
+  try {
+    const url = new URL(value)
+    const host = url.hostname.toLowerCase()
+    const trusted = host === 'capcut.com' || host.endsWith('.capcut.com') || host === 'www.capcutw.us'
+    return url.protocol === 'https:' && trusted && url.pathname === FINALIZE_PATH && !url.username && !url.password ? url.href : null
+  } catch {
+    return null
+  }
+}
 
 const VIDEO = ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'mpeg', 'mpg', '3gp', 'ts', 'mts', 'm2ts', 'flv']
 const AUDIO = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'aiff', 'aif']
@@ -239,8 +254,9 @@ async function uploadMedia(item, session, fetchImpl, log) {
   if (!vid) throw new Error('commit: response has no vid')
 
   const finalize = session.vod_finalize ?? session.video_finalize
-  if (finalize?.url !== FINALIZE_URL || !finalize.token) throw new Error('The upload session has no trusted finalize step')
-  const finalized = await readJson(await request(fetchImpl, FINALIZE_URL, {
+  const finalizeUrl = trustedFinalizeUrl(finalize?.url)
+  if (!finalizeUrl || !finalize.token) throw new Error('The upload session has no trusted finalize step')
+  const finalized = await readJson(await request(fetchImpl, finalizeUrl, {
     method: 'POST',
     headers: { authorization: `Bearer ${finalize.token}`, 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ vid }),
@@ -309,8 +325,31 @@ export async function uploadAll(ticket, files, { fetchImpl = fetch, log = () => 
   return { success: results.every(r => r.success), results }
 }
 
+// Node's built-in fetch uses HTTPS_PROXY only when NODE_USE_ENV_PROXY=1 is set at startup (Node 22.21+ or 24.5+).
+// With a proxy configured, run again with it set, so uploads work behind company or network proxies. Returns
+// true when the child process handled the command.
+export function proxySupported(version = process.versions.node) {
+  const [major, minor] = version.split('.').map(Number)
+  return major > 24 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21)
+}
+
+function rerunWithProxy() {
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy
+  if (!proxy || process.env.NODE_USE_ENV_PROXY === '1') return false
+  if (!proxySupported()) {
+    // Older Node can't use the proxy; try a direct connection as before, and say why if it fails.
+    console.error(`Note: an HTTPS proxy is set, but Node.js ${process.versions.node} can't use it for uploads (needs 22.21+ or 24.5+). Connecting directly.`)
+    return false
+  }
+  const child = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } })
+  if (child.error) throw child.error
+  process.exitCode = child.status ?? 1
+  return true
+}
+
 async function main() {
   const [command, ...files] = process.argv.slice(2)
+  if (command === 'upload' && rerunWithProxy()) return
   if (command === 'describe') {
     console.log(JSON.stringify({ files: describeFiles(files).map(({ file_name, size_bytes }) => ({ file_name, size_bytes })) }))
     return
