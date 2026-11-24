@@ -25,7 +25,9 @@ Music used to be curated for US accounts, and CapCut now searches it by prompt i
 
 ## Present results
 
-Show a numbered list with each item's title, the description CapCut returned, duration for audio, and a preview link when one is returned. Keep each item's `resource_id` and any `stdraft_uri` in the conversation for later use. Music results may come with only a title, an author and a duration, and no description; if so, say that you chose by title and offer the preview links so the user can listen first. Pass the `stdraft_uri` on unchanged: music and sound effects usually come as `sid://...`, fonts and visual materials as `vimo://...`.
+Show a numbered list with each item's title, the description CapCut returned, duration for audio, and a preview link when one is returned. Music and sound effects now come with a `preview_url` the user can play; offer it, and say it may expire. Always add the material with its `stdraft_uri`, never the preview link.
+
+When the user asks for a specific style, instrumentation, instrumental-only music or an exact recording, check the result's description before adding it. A broad label such as "cinematic" can mean suspense or a business promo. If the description doesn't show the requested property (vocals, instruments, mood), say so and offer the preview instead of claiming a match. Keep each item's `resource_id` and any `stdraft_uri` in the conversation for later use. Music results may come with only a title, an author and a duration, and no description; if so, say that you chose by title and offer the preview links so the user can listen first. Pass the `stdraft_uri` on unchanged: music and sound effects usually come as `sid://...`, fonts and visual materials as `vimo://...`.
 
 Describe only what the result says. Never guess a track's mood, tempo or sound from its title, and never rank items by how well they fit when the results carry no descriptive information. If you can't tell which items fit, say so and suggest the user listen to them in CapCut.
 

@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyOperations, curveAverageSpeed, draftDuration, fontProblems, newDraft, summarize, validate } from '../scripts/stdraft.mjs'
+import { applyOperations, curveAverageSpeed, sourceLength, draftDuration, fontProblems, newDraft, summarize, validate } from '../scripts/stdraft.mjs'
 
 const script = fileURLToPath(new URL('../scripts/stdraft.mjs', import.meta.url))
 
@@ -616,4 +616,14 @@ test('0.4.1: vertical canvases warn about safe zones and long template lines', (
   const text = summarize(draft)
   assert.match(text, /buttons and captions may cover it: text_0/)
   assert.match(text, /may run off the frame .*: caption_1/)
+})
+
+test('0.5.0: source length follows CapCut: playback times speed, rounded down for curves', () => {
+  const { draft } = applyOperations(sampleDraft(), [{ op: 'speed_ramp', id: 'clip_a', shape: 'hero' }])
+  const a = draft.segments.find(s => s.id === 'clip_a')
+  assert.ok(a.attributes['end.ms'] <= 3000, 'a ramp never reads past the original cut')
+  assert.equal(a.attributes['end.ms'], sourceLength(a, a.timeline['duration.ms']))
+  const c = applyOperations(sampleDraft(), [{ op: 'set_speed', id: 'clip_b', speed: 1.25 }]).draft.segments.find(s => s.id === 'clip_b')
+  assert.equal(c.timeline['duration.ms'], 1600)
+  assert.equal(c.attributes['end.ms'] - c.attributes['start.ms'], 2000)
 })

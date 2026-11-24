@@ -25,7 +25,7 @@ All AI generation, search and editing run on CapCut's servers under **your own C
 
 - [Claude Code](https://code.claude.com) 2.1.292 or later, running on your own computer (the CapCut login sends you back to a local address, so cloud and browser-only sessions cannot complete it)
 - A CapCut account. Your account region must match your internet connection's region (a US connection needs a US-registered account).
-- [Node.js](https://nodejs.org) 20 or later for uploads, draft editing, subtitle export and saving results (Windows: `winget install OpenJS.NodeJS.LTS`, macOS: `brew install node`)
+- [Node.js](https://nodejs.org) 20 or later for uploads, draft editing, subtitle export and saving results. Behind a company or network proxy (`HTTPS_PROXY`), uploads need Node.js 22.21 or later, or 24.5 or later (Windows: `winget install OpenJS.NodeJS.LTS`, macOS: `brew install node`)
 - Optional: [ffmpeg](https://ffmpeg.org), for portrait phone videos and mixed-language captions (Windows: `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`)
 - Optional: Google Chrome, Microsoft Edge, Chromium or Brave, for checking slide decks and exporting them to PDF, PNG or PowerPoint
 
