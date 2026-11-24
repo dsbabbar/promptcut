@@ -71,6 +71,7 @@ CapCut built these servers for AI assistants. The official CapCut x Codex plugin
 | `capcut-upload` | Send local videos, audio and images to CapCut |
 | `capcut-draft` | Add or change text, captions, music, clips and images in a CapCut draft |
 | `capcut-slides` | Make, present and export slide decks, and turn a deck into a CapCut slideshow video |
+| `capcut-motion` | Make animated explainers, titles and motion graphics with HyperFrames, assembled into a CapCut draft |
 
 You don't need to name a skill. Describe what you want, and Claude picks the right one.
 
@@ -84,7 +85,9 @@ You don't need to name a skill. Describe what you want, and Claude picks the rig
 | `scripts/download-media.mjs` | Saves generated images and videos from expiring links to a local folder |
 | `scripts/slides.mjs` | Creates and checks HTML slide decks, exports them to PDF, PNG or PowerPoint with your installed Chrome or Edge, and plans slideshow drafts. Uses `slides-runtime.js` (the viewer built into each deck) and `slides-pptx.mjs` (the PowerPoint writer). |
 
-They use only Node.js's built-in modules, so there is nothing to `npm install`.
+| `scripts/motion.mjs` | Sets up and runs a pinned HyperFrames release (HeyGen's open-source renderer) for motion videos, checks rendered shots and turns a shot plan into draft operations. Only local commands run; cloud rendering and publishing are refused. |
+
+They use only Node.js's built-in modules, so there is nothing to `npm install`. The exception is motion videos: `motion.mjs setup` downloads HyperFrames and its Chrome once, into `~/.cache/promptcut`, after asking you.
 
 ## The hook
 
